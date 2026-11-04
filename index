@@ -1,0 +1,1818 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monthly expenses - ระบบบริหารรายรับ-รายจ่าย (Dark SaaS UI)</title>
+  <!-- Google Fonts: Inter & Prompt -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Prompt', 'Inter', 'sans-serif'],
+            mono: ['Inter', 'monospace'],
+          }
+        }
+      }
+    };
+  </script>
+  <!-- React & Babel CDN -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase Cloud Sync Module -->
+  <script type="module">
+    import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.__FIREBASE_MODULES__ = {
+      initializeApp, getApps, getApp,
+      getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+      getFirestore, doc, setDoc, onSnapshot
+    };
+    window.dispatchEvent(new Event('firebase-modules-ready'));
+  </script>
+
+  <style>
+    body {
+      background-color: #080C14;
+      color: #F1F5F9;
+      font-family: 'Prompt', 'Inter', sans-serif;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #080C14;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1E293B;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#080C14] text-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // SVG Icons
+    const IconSparkles = ({ className = "w-5 h-5" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+      </svg>
+    );
+    const IconCalendar = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    );
+    const IconPlus = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <line x1="12" y1="5" x2="12" y2="19" />
+        <line x1="5" y1="12" x2="19" y2="12" />
+      </svg>
+    );
+    const IconTrash = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+      </svg>
+    );
+    const IconEdit = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+      </svg>
+    );
+    const IconCloud = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+      </svg>
+    );
+    const IconDownload = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+        <polyline points="7 10 12 15 17 10" />
+        <line x1="12" y1="15" x2="12" y2="3" />
+      </svg>
+    );
+    const IconRotate = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <polyline points="1 4 1 10 7 10" />
+        <path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
+      </svg>
+    );
+    const IconClock = ({ className = "w-3.5 h-3.5" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    );
+    const IconCheck = ({ className = "w-3.5 h-3.5" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+        <polyline points="22 4 12 14.01 9 11.01" />
+      </svg>
+    );
+    const IconSearch = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    );
+    const IconMail = ({ className = "w-5 h-5" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+      </svg>
+    );
+    const IconLogOut = ({ className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+      </svg>
+    );
+
+    const DEFAULT_SHEET_DATA = {
+      id: 'nov-2026',
+      name: 'พ.ย. 2026',
+      essentialLimitPct: 70,
+      investmentLimitPct: 20,
+      essentialExpenses: [
+        { id: 'e1', no: '1', item: 'ค่าข้าว', detail: 'อาหารประจำวัน', amount: 2000, status: 'pending' },
+        { id: 'e2', no: '2', item: 'Shoping , pod', detail: 'ไลฟ์สไตล์', amount: 0, status: 'pending' },
+        { id: 'e3', no: '3', item: 'ค่าบ้าน', detail: 'ที่อยู่อาศัย', amount: 17000, status: 'pending' },
+        { id: 'e4', no: '4', item: 'ค่ารถ', detail: 'สินเชื่อรถยนต์', amount: 9500, status: 'pending' },
+        { id: 'e5', no: '5', item: 'ค่าน้ำมัน,ล้างรถ', detail: 'เดินทาง', amount: 1500, status: 'pending' },
+        { id: 'e6', no: '6', item: 'ค่าจุกจิก', detail: 'Shopee', amount: 3100, status: 'paid' },
+        { id: 'e7', no: '7', item: 'ค่าจุกจิก', detail: 'จัดฟัน', amount: 0, status: 'pending' },
+        { id: 'e8', no: '8', item: 'ค่าจุกจิก', detail: 'น้ำดื่ม', amount: 1000, status: 'pending' },
+        { id: 'e9', no: '9', item: 'ค่าจุกจิก', detail: 'ค่าเน็ตโทรศัพท์', amount: 500, status: 'pending' },
+        { id: 'e10', no: '10', item: 'Ture Pay Next', detail: 'โทรศัพท์', amount: 0, status: 'pending' },
+        { id: 'e11', no: '11', item: 'ค่าบัตร', detail: 'ประกัน บัตร first choice', amount: 4500, status: 'paid' },
+        { id: 'e12', no: '12', item: 'ค่าบัตร', detail: 'บัตรกสิกร', amount: 3000, status: 'pending' },
+      ],
+      investments: [
+        { id: 'i1', no: '1', item: 'DCA กองทุน', detail: 'wp ultimate', amount: 0, status: 'pending' },
+        { id: 'i2', no: '2', item: 'FCF', detail: 'พอร์ตลงทุน', amount: 0, status: 'pending' },
+        { id: 'i3', no: '3', item: 'หุ้นอเมริกา', detail: 'พอร์ตต่างประเทศ', amount: 4000, status: 'paid' },
+        { id: 'i4', no: '4', item: 'เงินสำรองฉุกเฉิน', detail: 'บัญชีออมทรัพย์ดอกเบี้ยสูง', amount: 0, status: 'pending' },
+      ],
+      incomes: [
+        { id: 'inc1', no: '1', source: 'G', amount: 23000 },
+        { id: 'inc2', no: '2', source: 'Mindery', amount: 25000 },
+        { id: 'inc3', no: '3', source: 'ture', amount: 0 },
+      ],
+      extraExpenses: [
+        { id: 'ext1', no: '3', item: 'ทำฟัน', amount: 2000 },
+        { id: 'ext2', no: '4', item: 'ค่ามัดจำบ้าน', amount: 0 },
+        { id: 'ext3', no: '5', item: 'ต่อพรบ', amount: 0 },
+      ]
+    };
+
+    const INITIAL_SHEETS_HISTORY = [
+      {
+        id: 'aug-2026',
+        name: 'ส.ค. 2026',
+        essentialLimitPct: 70,
+        investmentLimitPct: 20,
+        essentialExpenses: [
+          { id: 'ae1', no: '1', item: 'ค่าข้าว', detail: 'อาหารประจำวัน', amount: 2500, status: 'paid' },
+          { id: 'ae2', no: '2', item: 'ค่าบ้าน', detail: 'ที่อยู่อาศัย', amount: 17000, status: 'paid' },
+          { id: 'ae3', no: '3', item: 'ค่ารถ', detail: 'สินเชื่อรถยนต์', amount: 9500, status: 'paid' },
+          { id: 'ae4', no: '4', item: 'ค่าน้ำมัน,ล้างรถ', detail: 'เดินทาง', amount: 1600, status: 'paid' },
+          { id: 'ae5', no: '5', item: 'ค่าจุกจิก', detail: 'น้ำดื่ม + ค่าเน็ต', amount: 1500, status: 'paid' },
+          { id: 'ae6', no: '6', item: 'ค่าบัตร', detail: 'บัตรเครดิต', amount: 5200, status: 'paid' },
+        ],
+        investments: [
+          { id: 'ai1', no: '1', item: 'DCA กองทุน', detail: 'wp ultimate', amount: 2000, status: 'paid' },
+          { id: 'ai2', no: '2', item: 'หุ้นอเมริกา', detail: 'พอร์ตต่างประเทศ', amount: 3500, status: 'paid' },
+          { id: 'ai3', no: '3', item: 'เงินสำรองฉุกเฉิน', detail: 'บัญชีออมทรัพย์', amount: 1500, status: 'paid' },
+        ],
+        incomes: [
+          { id: 'ainc1', no: '1', source: 'G', amount: 23000 },
+          { id: 'ainc2', no: '2', source: 'Mindery', amount: 24000 },
+        ],
+        extraExpenses: [
+          { id: 'aext1', no: '3', item: 'เช็คระยะรถยนต์', amount: 1200 },
+        ]
+      },
+      {
+        id: 'sep-2026',
+        name: 'ก.ย. 2026',
+        essentialLimitPct: 70,
+        investmentLimitPct: 20,
+        essentialExpenses: [
+          { id: 'se1', no: '1', item: 'ค่าข้าว', detail: 'อาหารประจำวัน', amount: 2200, status: 'paid' },
+          { id: 'se2', no: '2', item: 'ค่าบ้าน', detail: 'ที่อยู่อาศัย', amount: 17000, status: 'paid' },
+          { id: 'se3', no: '3', item: 'ค่ารถ', detail: 'สินเชื่อรถยนต์', amount: 9500, status: 'paid' },
+          { id: 'se4', no: '4', item: 'ค่าน้ำมัน,ล้างรถ', detail: 'เดินทาง', amount: 1500, status: 'paid' },
+          { id: 'se5', no: '5', item: 'ค่าจุกจิก', detail: 'Shopee + น้ำดื่ม + เน็ต', amount: 3800, status: 'paid' },
+          { id: 'se6', no: '6', item: 'ค่าบัตร', detail: 'บัตรเครดิต', amount: 6000, status: 'paid' },
+        ],
+        investments: [
+          { id: 'si1', no: '1', item: 'หุ้นอเมริกา', detail: 'พอร์ตต่างประเทศ', amount: 4000, status: 'paid' },
+          { id: 'si2', no: '2', item: 'เงินสำรองฉุกเฉิน', detail: 'บัญชีออมทรัพย์', amount: 2000, status: 'paid' },
+        ],
+        incomes: [
+          { id: 'sinc1', no: '1', source: 'G', amount: 23000 },
+          { id: 'sinc2', no: '2', source: 'Mindery', amount: 25500 },
+        ],
+        extraExpenses: [
+          { id: 'sext1', no: '3', item: 'ต่อพรบ', amount: 650 },
+        ]
+      },
+      {
+        id: 'oct-2026',
+        name: 'ต.ค. 2026',
+        essentialLimitPct: 70,
+        investmentLimitPct: 20,
+        essentialExpenses: [
+          { id: 'oe1', no: '1', item: 'ค่าข้าว', detail: 'อาหารประจำวัน', amount: 2100, status: 'paid' },
+          { id: 'oe2', no: '2', item: 'ค่าบ้าน', detail: 'ที่อยู่อาศัย', amount: 17000, status: 'paid' },
+          { id: 'oe3', no: '3', item: 'ค่ารถ', detail: 'สินเชื่อรถยนต์', amount: 9500, status: 'paid' },
+          { id: 'oe4', no: '4', item: 'ค่าน้ำมัน,ล้างรถ', detail: 'เดินทาง', amount: 1500, status: 'paid' },
+          { id: 'oe5', no: '5', item: 'ค่าจุกจิก', detail: 'Shopee + น้ำดื่ม + เน็ต', amount: 4200, status: 'paid' },
+          { id: 'oe6', no: '6', item: 'ค่าบัตร', detail: 'ประกัน + บัตรกสิกร', amount: 6800, status: 'paid' },
+        ],
+        investments: [
+          { id: 'oi1', no: '1', item: 'DCA กองทุน', detail: 'wp ultimate', amount: 1000, status: 'paid' },
+          { id: 'oi2', no: '2', item: 'หุ้นอเมริกา', detail: 'พอร์ตต่างประเทศ', amount: 4000, status: 'paid' },
+        ],
+        incomes: [
+          { id: 'oinc1', no: '1', source: 'G', amount: 23000 },
+          { id: 'oinc2', no: '2', source: 'Mindery', amount: 25000 },
+        ],
+        extraExpenses: [
+          { id: 'oext1', no: '3', item: 'ของแต่งบ้าน', amount: 1500 },
+        ]
+      },
+      DEFAULT_SHEET_DATA
+    ];
+
+    const migrateRowStatus = (row) => {
+      if (row.status !== undefined) return row.status;
+      if (row.isPaid || row.isPriority) return 'paid';
+      return Number(row.amount) > 0 ? 'pending' : 'none';
+    };
+
+    const computeSheetSummary = (sheet) => {
+      const essentialExpenses = (sheet.essentialExpenses || []).map(r => ({ ...r, status: migrateRowStatus(r) }));
+      const investments = (sheet.investments || []).map(r => ({ ...r, status: migrateRowStatus(r) }));
+
+      const essentialTotal = essentialExpenses.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const essentialPaidTotal = essentialExpenses.reduce((sum, r) => sum + (r.status === 'paid' ? Number(r.amount) || 0 : 0), 0);
+      const essentialPendingTotal = essentialExpenses.reduce((sum, r) => sum + (r.status === 'pending' ? Number(r.amount) || 0 : 0), 0);
+      const essentialPaidCount = essentialExpenses.filter((r) => r.status === 'paid').length;
+      const essentialPendingCount = essentialExpenses.filter((r) => r.status === 'pending').length;
+
+      const investmentTotal = investments.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const investmentPaidTotal = investments.reduce((sum, r) => sum + (r.status === 'paid' ? Number(r.amount) || 0 : 0), 0);
+      const investmentPendingTotal = investments.reduce((sum, r) => sum + (r.status === 'pending' ? Number(r.amount) || 0 : 0), 0);
+      const investmentPaidCount = investments.filter((r) => r.status === 'paid').length;
+      const investmentPendingCount = investments.filter((r) => r.status === 'pending').length;
+
+      const incomeTotal = (sheet.incomes || []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const extraExpenseTotal = (sheet.extraExpenses || []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+      const totalAllExpenses = essentialTotal + investmentTotal + extraExpenseTotal;
+      const netRemaining = incomeTotal - totalAllExpenses;
+
+      return {
+        essentialTotal,
+        essentialPaidTotal,
+        essentialPendingTotal,
+        essentialPaidCount,
+        essentialPendingCount,
+        investmentTotal,
+        investmentPaidTotal,
+        investmentPendingTotal,
+        investmentPaidCount,
+        investmentPendingCount,
+        incomeTotal,
+        extraExpenseTotal,
+        totalAllExpenses,
+        netRemaining,
+      };
+    };
+
+    const formatCurrency = (num) => {
+      const value = Number(num) || 0;
+      return value.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    };
+
+    const EditableNumberCell = ({ value, onChange, status = 'none', placeholder = '0.00' }) => {
+      const [isFocused, setIsFocused] = useState(false);
+      const [tempVal, setTempVal] = useState(value === 0 ? '' : String(value));
+
+      useEffect(() => {
+        if (!isFocused) {
+          setTempVal(value === 0 ? '' : String(value));
+        }
+      }, [value, isFocused]);
+
+      const handleFocus = () => {
+        setIsFocused(true);
+        setTempVal(value === 0 ? '' : String(value));
+      };
+
+      const handleBlur = () => {
+        setIsFocused(false);
+        const parsed = parseFloat(String(tempVal).replace(/,/g, ''));
+        onChange(isNaN(parsed) ? 0 : parsed);
+      };
+
+      const handleKeyDown = (e) => {
+        if (e.key === 'Enter') e.target.blur();
+      };
+
+      const displayText = () => {
+        if (isFocused) return tempVal;
+        if (!value || Number(value) === 0) return '0.00';
+        return formatCurrency(value);
+      };
+
+      return (
+        <div className="relative flex items-center justify-end">
+          <input
+            type={isFocused ? 'number' : 'text'}
+            step="any"
+            value={displayText()}
+            placeholder={placeholder}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            onChange={(e) => setTempVal(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={`w-full px-3 py-1.5 text-right font-mono text-sm rounded-lg border transition-all duration-150 focus:outline-none ${
+              isFocused
+                ? 'bg-[#090D16] border-blue-500 text-white ring-2 ring-blue-500/30'
+                : status === 'paid'
+                ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 font-semibold hover:border-rose-400'
+                : status === 'pending'
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold hover:border-amber-400'
+                : Number(value) > 0
+                ? 'bg-[#0D1322]/70 border-slate-800/80 text-slate-100 hover:border-slate-700'
+                : 'bg-transparent border-transparent text-slate-500 hover:border-slate-800'
+            }`}
+          />
+        </div>
+      );
+    };
+
+    function App() {
+      // ระบบล็อกอินด้วยอีเมลก่อนเข้าใช้งาน
+      const [cloudEmail, setCloudEmail] = useState(() => localStorage.getItem('monthly_expenses_cloud_email') || '');
+      const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('monthly_expenses_cloud_email')));
+      const [loginEmailInput, setLoginEmailInput] = useState(() => localStorage.getItem('monthly_expenses_cloud_email') || '');
+      const [loginGasInput, setLoginGasInput] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || '');
+      const [showAdvancedGas, setShowAdvancedGas] = useState(false);
+
+      const getStorageKey = (email) => {
+        const clean = String(email || 'default').trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
+        return `monthly_expenses_dark_v3_${clean}`;
+      };
+
+      const [sheets, setSheets] = useState(() => {
+        try {
+          const currentEmail = localStorage.getItem('monthly_expenses_cloud_email') || '';
+          const perUserSaved = currentEmail ? localStorage.getItem(getStorageKey(currentEmail)) : null;
+          const fallbackSaved = localStorage.getItem('monthly_expenses_dark_v3');
+          const raw = perUserSaved || fallbackSaved;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+          }
+        } catch (e) {}
+        return INITIAL_SHEETS_HISTORY;
+      });
+
+      const [activeSheetId, setActiveSheetId] = useState(() => {
+        return localStorage.getItem('monthly_expenses_active_id_v3') || 'nov-2026';
+      });
+
+      const [activePage, setActivePage] = useState('workspace');
+      const [hideZeroRows, setHideZeroRows] = useState(false);
+      const [searchQuery, setSearchQuery] = useState('');
+      const [expensePercentMode, setExpensePercentMode] = useState('income');
+      const [newMonthModal, setNewMonthModal] = useState(false);
+      const [newMonthName, setNewMonthName] = useState('');
+      const [copyFromCurrent, setCopyFromCurrent] = useState(true);
+      const [editMonthModal, setEditMonthModal] = useState(null);
+      const [deleteMonthModal, setDeleteMonthModal] = useState(null);
+      const [confirmResetModal, setConfirmResetModal] = useState(false);
+      const [toastMsg, setToastMsg] = useState(null);
+
+      // Cloud Sync State
+      const [inputCloudEmail, setInputCloudEmail] = useState('');
+      const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || '');
+      const [inputGasUrl, setInputGasUrl] = useState('');
+      const [cloudModal, setCloudModal] = useState(false);
+      const [syncStatus, setSyncStatus] = useState('idle');
+      const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
+      const cloudDbRef = useRef(null);
+      const [cloudUser, setCloudUser] = useState(null);
+      const isRemoteUpdateRef = useRef(false);
+      const isInitialFetchedRef = useRef(false);
+      const lastSavedHashRef = useRef('');
+
+      const normalizeEmailKey = (str) => String(str || 'default').trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
+      const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'monthly-expenses-app';
+
+      const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(null), 3000);
+      };
+
+      // Initialize Firebase when modules are ready
+      useEffect(() => {
+        const setupFirebase = async () => {
+          const mods = window.__FIREBASE_MODULES__;
+          if (!mods) return;
+          try {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+              const cfg = JSON.parse(__firebase_config);
+              const app = mods.getApps().length === 0 ? mods.initializeApp(cfg) : mods.getApp();
+              const auth = mods.getAuth(app);
+              const db = mods.getFirestore(app);
+              cloudDbRef.current = db;
+
+              if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await mods.signInWithCustomToken(auth, __initial_auth_token);
+              } else {
+                await mods.signInAnonymously(auth);
+              }
+              mods.onAuthStateChanged(auth, (u) => setCloudUser(u));
+            }
+          } catch (e) {
+            console.warn('Cloud init skipped:', e);
+          }
+        };
+
+        if (window.__FIREBASE_MODULES__) {
+          setupFirebase();
+        } else {
+          window.addEventListener('firebase-modules-ready', setupFirebase);
+          return () => window.removeEventListener('firebase-modules-ready', setupFirebase);
+        }
+      }, []);
+
+      // Real-time Firestore listener per Email
+      useEffect(() => {
+        const mods = window.__FIREBASE_MODULES__;
+        if (!mods || !cloudUser || !cloudDbRef.current || !cloudEmail || !isLoggedIn) return;
+        const docKey = `account_${normalizeEmailKey(cloudEmail)}`;
+        const docRef = mods.doc(cloudDbRef.current, 'artifacts', currentAppId, 'public', 'data', 'user_budgets', docKey);
+
+        setSyncStatus('loading');
+        const unsubscribe = mods.onSnapshot(
+          docRef,
+          (snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              if (data && data.sheetsJson && data.sheetsJson !== lastSavedHashRef.current) {
+                try {
+                  const parsed = JSON.parse(data.sheetsJson);
+                  if (Array.isArray(parsed) && parsed.length > 0) {
+                    isRemoteUpdateRef.current = true;
+                    lastSavedHashRef.current = data.sheetsJson;
+                    setSheets(parsed);
+                    if (data.activeSheetId) setActiveSheetId(data.activeSheetId);
+                  }
+                } catch (e) {}
+              }
+              setLastSyncedAt(new Date());
+              setSyncStatus('synced');
+            } else {
+              const jsonStr = JSON.stringify(sheets);
+              lastSavedHashRef.current = jsonStr;
+              mods.setDoc(docRef, {
+                email: cloudEmail,
+                sheetsJson: jsonStr,
+                activeSheetId: activeSheetId,
+                updatedAt: new Date().toISOString()
+              }).then(() => {
+                setLastSyncedAt(new Date());
+                setSyncStatus('synced');
+              }).catch(() => {});
+            }
+            isInitialFetchedRef.current = true;
+          },
+          () => {
+            if (!gasUrl) setSyncStatus('idle');
+          }
+        );
+        return () => unsubscribe();
+      }, [cloudUser, cloudEmail, isLoggedIn]);
+
+      // Save to LocalStorage per user & global backup
+      useEffect(() => {
+        try {
+          localStorage.setItem('monthly_expenses_dark_v3', JSON.stringify(sheets));
+          if (cloudEmail) {
+            localStorage.setItem(getStorageKey(cloudEmail), JSON.stringify(sheets));
+          }
+          localStorage.setItem('monthly_expenses_active_id_v3', activeSheetId);
+        } catch (e) {}
+      }, [sheets, activeSheetId, cloudEmail]);
+
+      const fetchFromGoogleSheet = async (targetUrl = gasUrl, silent = false) => {
+        if (!targetUrl) return;
+        setSyncStatus('loading');
+        try {
+          const response = await fetch(`${targetUrl}?t=${Date.now()}`);
+          const data = await response.json();
+          if (data && data.status === 'success' && Array.isArray(data.sheets) && data.sheets.length > 0) {
+            isRemoteUpdateRef.current = true;
+            setSheets(data.sheets);
+            if (data.activeSheetId) setActiveSheetId(data.activeSheetId);
+            setLastSyncedAt(new Date());
+            setSyncStatus('synced');
+            if (!silent) showToast(`ซิงค์ข้อมูลจาก Google Sheets สำเร็จ (${data.sheets.length} เดือน)`);
+          }
+        } catch (err) {
+          setSyncStatus('error');
+          if (!silent) showToast('ไม่สามารถดึงข้อมูลจาก Google Sheets ได้');
+        } finally {
+          isInitialFetchedRef.current = true;
+        }
+      };
+
+      const pushToGoogleSheet = async (targetUrl = gasUrl, sheetsData = sheets, activeId = activeSheetId) => {
+        if (!targetUrl) return;
+        setSyncStatus('saving');
+        try {
+          const response = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'syncAll',
+              email: cloudEmail,
+              sheets: Array.isArray(sheetsData) ? sheetsData : [],
+              activeSheetId: activeId || '',
+            }),
+          });
+          const result = await response.json();
+          if (result && result.status === 'success') {
+            setLastSyncedAt(new Date());
+            setSyncStatus('synced');
+          }
+        } catch (err) {
+          setSyncStatus('error');
+        }
+      };
+
+      useEffect(() => {
+        if (gasUrl && isLoggedIn) fetchFromGoogleSheet(gasUrl, true);
+      }, [isLoggedIn]);
+
+      // Auto-save to Cloud & Google Sheet
+      useEffect(() => {
+        if (!isLoggedIn) return;
+        if (isRemoteUpdateRef.current) {
+          isRemoteUpdateRef.current = false;
+          return;
+        }
+        const timer = setTimeout(async () => {
+          const mods = window.__FIREBASE_MODULES__;
+          if (mods && cloudUser && cloudDbRef.current && cloudEmail && isInitialFetchedRef.current) {
+            try {
+              setSyncStatus('saving');
+              const docKey = `account_${normalizeEmailKey(cloudEmail)}`;
+              const docRef = mods.doc(cloudDbRef.current, 'artifacts', currentAppId, 'public', 'data', 'user_budgets', docKey);
+              const jsonStr = JSON.stringify(sheets);
+              lastSavedHashRef.current = jsonStr;
+              await mods.setDoc(docRef, {
+                email: cloudEmail,
+                sheetsJson: jsonStr,
+                activeSheetId: activeSheetId,
+                updatedAt: new Date().toISOString()
+              });
+              setLastSyncedAt(new Date());
+              setSyncStatus('synced');
+            } catch (e) {}
+          }
+          if (gasUrl) {
+            pushToGoogleSheet(gasUrl, sheets, activeSheetId);
+          }
+        }, 900);
+        return () => clearTimeout(timer);
+      }, [sheets, activeSheetId, gasUrl, cloudUser, cloudEmail, isLoggedIn]);
+
+      // ฟังก์ชันล็อกอินก่อนเข้าระบบ
+      const handleLoginSubmit = async (e) => {
+        e.preventDefault();
+        const trimmedEmail = loginEmailInput.trim().toLowerCase();
+        if (!trimmedEmail) return;
+
+        // โหลดข้อมูลของอีเมลนั้นจาก LocalStorage ก่อนหากมี
+        try {
+          const savedForEmail = localStorage.getItem(getStorageKey(trimmedEmail));
+          if (savedForEmail) {
+            const parsed = JSON.parse(savedForEmail);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSheets(parsed);
+            }
+          }
+        } catch (err) {}
+
+        setCloudEmail(trimmedEmail);
+        localStorage.setItem('monthly_expenses_cloud_email', trimmedEmail);
+
+        const trimmedGas = loginGasInput.trim();
+        if (trimmedGas) {
+          setGasUrl(trimmedGas);
+          localStorage.setItem('monthly_expenses_gas_url', trimmedGas);
+        }
+
+        setIsLoggedIn(true);
+        showToast(`เข้าสู่ระบบและซิงค์ข้อมูลกับ "${trimmedEmail}" เรียบร้อยแล้ว`);
+      };
+
+      const handleLogout = () => {
+        setIsLoggedIn(false);
+        setLoginEmailInput(cloudEmail);
+        setLoginGasInput(gasUrl);
+      };
+
+      const handleSaveCloudSettings = async (e) => {
+        e.preventDefault();
+        const trimmedEmail = inputCloudEmail.trim().toLowerCase();
+        if (trimmedEmail) {
+          setCloudEmail(trimmedEmail);
+          localStorage.setItem('monthly_expenses_cloud_email', trimmedEmail);
+          showToast(`ซิงค์ข้อมูลกับอีเมล "${trimmedEmail}" เรียบร้อยแล้ว`);
+        }
+        const trimmedUrl = inputGasUrl.trim();
+        setGasUrl(trimmedUrl);
+        if (trimmedUrl) {
+          localStorage.setItem('monthly_expenses_gas_url', trimmedUrl);
+          await fetchFromGoogleSheet(trimmedUrl, false);
+        } else {
+          localStorage.removeItem('monthly_expenses_gas_url');
+        }
+        setCloudModal(false);
+      };
+
+      const currentSheet = useMemo(() => {
+        return sheets.find((s) => s.id === activeSheetId) || sheets[sheets.length - 1] || sheets[0];
+      }, [sheets, activeSheetId]);
+
+      const updateCurrentSheet = (updater) => {
+        setSheets((prevSheets) =>
+          prevSheets.map((sheet) => {
+            if (sheet.id === currentSheet.id) {
+              return typeof updater === 'function' ? updater(sheet) : { ...sheet, ...updater };
+            }
+            return sheet;
+          })
+        );
+      };
+
+      const totals = useMemo(() => computeSheetSummary(currentSheet), [currentSheet]);
+      const monthlySummaries = useMemo(() => sheets.map((s) => ({ id: s.id, name: s.name, ...computeSheetSummary(s) })), [sheets]);
+
+      const calcExpensePercentNum = (amount) => {
+        const val = Number(amount) || 0;
+        const base = expensePercentMode === 'income' ? totals.incomeTotal : totals.totalAllExpenses;
+        if (!base || base <= 0) return 0;
+        return (val / base) * 100;
+      };
+
+      const calcExpensePercent = (amount) => `${calcExpensePercentNum(amount).toFixed(2)}%`;
+
+      const essentialLimitPct = currentSheet.essentialLimitPct !== undefined ? Number(currentSheet.essentialLimitPct) : 70;
+      const investmentLimitPct = currentSheet.investmentLimitPct !== undefined ? Number(currentSheet.investmentLimitPct) : 20;
+
+      const handleLimitPctChange = (field, value) => {
+        const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+        updateCurrentSheet((sheet) => ({ ...sheet, [field]: clamped }));
+      };
+
+      const handleEssentialChange = (id, field, value) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          essentialExpenses: (sheet.essentialExpenses || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+        }));
+      };
+
+      const addEssentialRow = () => {
+        const nextNo = (currentSheet.essentialExpenses || []).length + 1;
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          essentialExpenses: [...(sheet.essentialExpenses || []), { id: `e_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' }],
+        }));
+      };
+
+      const deleteEssentialRow = (id) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          essentialExpenses: (sheet.essentialExpenses || []).filter((r) => r.id !== id),
+        }));
+      };
+
+      const handleInvestmentChange = (id, field, value) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          investments: (sheet.investments || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+        }));
+      };
+
+      const addInvestmentRow = () => {
+        const nextNo = (currentSheet.investments || []).length + 1;
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          investments: [...(sheet.investments || []), { id: `i_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' }],
+        }));
+      };
+
+      const deleteInvestmentRow = (id) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          investments: (sheet.investments || []).filter((r) => r.id !== id),
+        }));
+      };
+
+      const handleIncomeChange = (id, field, value) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          incomes: (sheet.incomes || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+        }));
+      };
+
+      const addIncomeRow = () => {
+        const nextNo = (currentSheet.incomes || []).length + 1;
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          incomes: [...(sheet.incomes || []), { id: `inc_${Date.now()}`, no: String(nextNo), source: '', amount: 0 }],
+        }));
+      };
+
+      const deleteIncomeRow = (id) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          incomes: (sheet.incomes || []).filter((r) => r.id !== id),
+        }));
+      };
+
+      const handleExtraExpenseChange = (id, field, value) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          extraExpenses: (sheet.extraExpenses || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
+        }));
+      };
+
+      const addExtraExpenseRow = () => {
+        const nextNo = (currentSheet.extraExpenses || []).length + 3;
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          extraExpenses: [...(sheet.extraExpenses || []), { id: `ext_${Date.now()}`, no: String(nextNo), item: '', amount: 0 }],
+        }));
+      };
+
+      const deleteExtraExpenseRow = (id) => {
+        updateCurrentSheet((sheet) => ({
+          ...sheet,
+          extraExpenses: (sheet.extraExpenses || []).filter((r) => r.id !== id),
+        }));
+      };
+
+      const handleCreateNewMonth = (e) => {
+        e.preventDefault();
+        if (!newMonthName.trim()) return;
+        const newId = `sheet_${Date.now()}`;
+        const baseData = copyFromCurrent ? currentSheet : DEFAULT_SHEET_DATA;
+        const newSheet = {
+          ...JSON.parse(JSON.stringify(baseData)),
+          id: newId,
+          name: newMonthName.trim(),
+        };
+        setSheets((prev) => [...prev, newSheet]);
+        setActiveSheetId(newId);
+        setNewMonthName('');
+        setNewMonthModal(false);
+        showToast(`สร้างงบเดือน "${newSheet.name}" เรียบร้อยแล้ว`);
+      };
+
+      const handleRenameMonth = (e) => {
+        e.preventDefault();
+        if (!editMonthModal || !editMonthModal.name.trim()) return;
+        const updatedName = editMonthModal.name.trim();
+        setSheets((prev) => prev.map((s) => (s.id === editMonthModal.id ? { ...s, name: updatedName } : s)));
+        setEditMonthModal(null);
+        showToast(`เปลี่ยนชื่อเดือนเป็น "${updatedName}" เรียบร้อยแล้ว`);
+      };
+
+      const handleDeleteMonthById = (targetId) => {
+        const target = sheets.find((s) => s.id === targetId);
+        if (!target) return;
+        if (sheets.length <= 1) {
+          const resetSheet = { ...JSON.parse(JSON.stringify(DEFAULT_SHEET_DATA)), id: `sheet_${Date.now()}` };
+          setSheets([resetSheet]);
+          setActiveSheetId(resetSheet.id);
+          setDeleteMonthModal(null);
+          showToast('รีเซ็ตเป็นเดือนเริ่มต้นเรียบร้อยแล้ว');
+          return;
+        }
+        const remaining = sheets.filter((s) => s.id !== targetId);
+        setSheets(remaining);
+        if (activeSheetId === targetId) setActiveSheetId(remaining[remaining.length - 1].id);
+        setDeleteMonthModal(null);
+        showToast(`ลบเดือน "${target.name}" เรียบร้อยแล้ว`);
+      };
+
+      const handleExportCSV = () => {
+        const rows = [
+          ['สรุปรายรับ-รายจ่าย:', currentSheet.name, 'บัญชี:', cloudEmail],
+          [],
+          ['--- 1. รายจ่ายจำเป็น ---'],
+          ['ลำดับ', 'รายการ', 'รายละเอียด', 'จำนวนเงิน', 'สถานะ'],
+          ...(currentSheet.essentialExpenses || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
+          ['', 'รวมรายจ่ายจำเป็น', '', totals.essentialTotal],
+          [],
+          ['--- 2. เงินลงทุน ---'],
+          ['ลำดับ', 'รายการ', 'รายละเอียด', 'งบลงทุน', 'สถานะ'],
+          ...(currentSheet.investments || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
+          ['', 'รวมเงินลงทุน', '', totals.investmentTotal],
+          [],
+          ['--- 3. รวมรายได้ของเดือนนี้ ---'],
+          ['ลำดับ', 'แหล่งรายได้', 'จำนวนเงิน'],
+          ...(currentSheet.incomes || []).map((r) => [r.no, r.source, r.amount]),
+          ['', 'รายได้รวมทั้งหมด', totals.incomeTotal],
+          [],
+          ['--- 4. รวมรายจ่ายของเดือนนี้ ---'],
+          ['1', 'ค่าใช้จ่ายจำเป็น', totals.essentialTotal],
+          ['2', 'ลงทุน , เงินเก็บ', totals.investmentTotal],
+          ...(currentSheet.extraExpenses || []).map((r) => [r.no, r.item, r.amount]),
+          ['', 'รายจ่ายรวมทั้งหมด', totals.totalAllExpenses],
+          ['', 'คงเหลือสุทธิ (TOTAL)', totals.netRemaining],
+        ];
+        const csvContent = '\uFEFF' + rows.map((e) => e.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `Monthly_expenses_${currentSheet.name}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const filteredEssential = useMemo(() => {
+        return (currentSheet.essentialExpenses || []).filter((row) => {
+          if (hideZeroRows && (!row.amount || Number(row.amount) === 0)) return false;
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          return (row.item || '').toLowerCase().includes(q) || (row.detail || '').toLowerCase().includes(q);
+        });
+      }, [currentSheet.essentialExpenses, hideZeroRows, searchQuery]);
+
+      const filteredInvestments = useMemo(() => {
+        return (currentSheet.investments || []).filter((row) => {
+          if (hideZeroRows && (!row.amount || Number(row.amount) === 0)) return false;
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          return (row.item || '').toLowerCase().includes(q) || (row.detail || '').toLowerCase().includes(q);
+        });
+      }, [currentSheet.investments, hideZeroRows, searchQuery]);
+
+      const filteredIncomes = useMemo(() => {
+        return (currentSheet.incomes || []).filter((row) => {
+          if (hideZeroRows && (!row.amount || Number(row.amount) === 0)) return false;
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          return (row.source || '').toLowerCase().includes(q);
+        });
+      }, [currentSheet.incomes, hideZeroRows, searchQuery]);
+
+      const filteredExtraExpenses = useMemo(() => {
+        return (currentSheet.extraExpenses || []).filter((row) => {
+          if (hideZeroRows && (!row.amount || Number(row.amount) === 0)) return false;
+          if (!searchQuery.trim()) return true;
+          const q = searchQuery.toLowerCase();
+          return (row.item || '').toLowerCase().includes(q);
+        });
+      }, [currentSheet.extraExpenses, hideZeroRows, searchQuery]);
+
+      // ============================================================================
+      // หน้าล็อกอินด้วยอีเมลก่อนเข้าใช้งาน (Email Login Gate)
+      // ============================================================================
+      if (!isLoggedIn) {
+        return (
+          <div className="min-h-screen bg-[#080C14] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+            <div className="pointer-events-none fixed top-1/4 left-1/4 w-[480px] h-[320px] bg-blue-600/15 blur-[130px] rounded-full" />
+            <div className="pointer-events-none fixed bottom-1/4 right-1/4 w-[420px] h-[300px] bg-emerald-600/10 blur-[140px] rounded-full" />
+
+            <div className="w-full max-w-md bg-[#111827]/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 space-y-6">
+              <div className="flex flex-col items-center text-center space-y-3">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white shadow-xl shadow-blue-600/30 border border-blue-400/30">
+                  <IconSparkles className="w-7 h-7" />
+                </div>
+                <div>
+                  <span className="text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 px-3 py-0.5 rounded-full">
+                    Cloud Auto-Sync • Financial SaaS
+                  </span>
+                  <h1 className="text-2xl font-extrabold text-white mt-2 tracking-tight">
+                    เข้าสู่ระบบจัดการงบรายเดือน
+                  </h1>
+                  <p className="text-xs text-slate-400 mt-1">
+                    กรอกอีเมลของคุณเพื่อซิงค์ข้อมูลรายรับ-รายจ่ายอัตโนมัติ เปิดในคอมหรือมือถือเครื่องไหนข้อมูลก็อัปเดตตรงกันทันที
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleLoginSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    อีเมลสำหรับซิงค์ข้อมูลของคุณ (Email Address)
+                  </label>
+                  <div className="relative">
+                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400">
+                      <IconMail className="w-5 h-5" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      placeholder="yourname@gmail.com"
+                      value={loginEmailInput}
+                      onChange={(e) => setLoginEmailInput(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 bg-[#090D16] border border-slate-700 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedGas(!showAdvancedGas)}
+                    className="text-[11px] text-slate-400 hover:text-blue-400 transition cursor-pointer flex items-center gap-1"
+                  >
+                    <span>{showAdvancedGas ? '▼ ซ่อนตั้งค่า Google Sheets เสริม' : '▶ ตั้งค่าเชื่อม Google Sheets Web App URL (เสริม - ไม่บังคับ)'}</span>
+                  </button>
+
+                  {showAdvancedGas && (
+                    <div className="mt-2 p-3 bg-[#090D16]/80 rounded-xl border border-slate-800 space-y-1.5">
+                      <label className="block text-[11px] text-slate-400">Google Apps Script URL (ลงท้ายด้วย /exec)</label>
+                      <input
+                        type="url"
+                        placeholder="https://script.google.com/macros/s/.../exec"
+                        value={loginGasInput}
+                        onChange={(e) => setLoginGasInput(e.target.value)}
+                        className="w-full px-3 py-2 bg-[#111827] border border-slate-700 rounded-lg text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-600/30 border border-blue-400/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <IconCloud className="w-4 h-4" />
+                  <span>เข้าสู่ระบบ & ซิงค์ข้อมูลเข้าอีเมล</span>
+                </button>
+              </form>
+
+              <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-400 font-medium">
+                  <IconCheck className="w-4 h-4 shrink-0" />
+                  <span>ไม่ต้องตั้งรหัสผ่าน ข้อมูลผูกกับอีเมลของคุณโดยอัตโนมัติ</span>
+                </div>
+                <p className="text-slate-500 leading-relaxed">
+                  เวลาเปลี่ยนคอมพิวเตอร์หรือเปิดในมือถือ เพียงกรอกอีเมลเดิมนี้ ระบบจะดึงข้อมูลล่าสุดของคุณขึ้นมาแสดงทันที
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-[#080C14] text-slate-100 pb-20 relative overflow-x-hidden">
+          {toastMsg && (
+            <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#111827]/95 backdrop-blur-md text-slate-100 px-4 py-3 rounded-xl shadow-2xl border border-blue-500/40">
+              <IconCheck className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="text-sm font-medium">{toastMsg}</span>
+            </div>
+          )}
+
+          {/* Top Navbar */}
+          <header className="sticky top-0 z-30 bg-[#080C14]/90 backdrop-blur-xl border-b border-slate-800/80">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white shadow-lg shadow-blue-600/30 border border-blue-400/30">
+                  <IconSparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <h1 className="text-lg font-bold tracking-tight text-white">Monthly expenses</h1>
+                    <span className="text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 px-2.5 py-0.5 rounded-full">
+                      Financial SaaS
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    ระบบบริหารรายรับ-รายจ่ายและพอร์ตการลงทุนรายเดือน • ซิงค์เข้าอีเมลอัตโนมัติ
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center bg-[#111827] p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActivePage('workspace')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                    activePage === 'workspace' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  ตารางจัดการงบ (4 หัวข้อ)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActivePage('analytics')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                    activePage === 'analytics' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  สรุปรายเดือน & กราฟ
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center bg-[#111827] rounded-xl px-2.5 py-1 border border-slate-800 gap-1">
+                  <IconCalendar className="w-4 h-4 text-blue-400 mr-1" />
+                  <select
+                    value={currentSheet.id}
+                    onChange={(e) => setActiveSheetId(e.target.value)}
+                    className="bg-transparent text-xs sm:text-sm font-medium text-slate-200 focus:outline-none cursor-pointer pr-1 py-0.5"
+                  >
+                    {sheets.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-[#111827] text-slate-100">
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setEditMonthModal({ id: currentSheet.id, name: currentSheet.name })}
+                    title="แก้ไขชื่อเดือนนี้"
+                    className="p-1 rounded-lg text-slate-400 hover:text-blue-400 cursor-pointer"
+                  >
+                    <IconEdit className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMonthModal({ id: currentSheet.id, name: currentSheet.name })}
+                    title="ลบเดือนนี้"
+                    className="p-1 rounded-lg text-slate-400 hover:text-rose-400 cursor-pointer"
+                  >
+                    <IconTrash className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => setNewMonthModal(true)}
+                  className="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer"
+                >
+                  <IconPlus className="w-4 h-4" />
+                  <span>เดือนใหม่</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setInputCloudEmail(cloudEmail);
+                    setInputGasUrl(gasUrl);
+                    setCloudModal(true);
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border bg-emerald-950/50 border-emerald-500/50 text-emerald-300 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <IconCloud className="w-4 h-4 text-emerald-400" />
+                  <span>{syncStatus === 'saving' ? 'กำลังซิงค์...' : `ซิงค์: ${cloudEmail}`}</span>
+                </button>
+
+                <button
+                  onClick={handleLogout}
+                  title="สลับบัญชีอีเมล / ออกจากระบบ"
+                  className="px-2.5 py-2 rounded-xl text-xs font-medium bg-[#111827] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1 cursor-pointer"
+                >
+                  <IconLogOut className="w-4 h-4 text-rose-400" />
+                  <span className="hidden md:inline">สลับอีเมล</span>
+                </button>
+
+                <button
+                  onClick={handleExportCSV}
+                  className="px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-[#111827] hover:bg-slate-800 text-slate-200 border border-slate-800 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <IconDownload className="w-4 h-4 text-blue-400" />
+                  <span className="hidden sm:inline">CSV</span>
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Content */}
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
+            {activePage === 'workspace' ? (
+              <>
+                {/* Summary KPI Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-gradient-to-br from-emerald-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-emerald-500/35">
+                    <div className="text-xs font-semibold text-emerald-400 mb-2">รวมรายได้ของเดือนนี้ ({currentSheet.name})</div>
+                    <div className="text-2xl font-bold text-emerald-400 font-mono">฿{formatCurrency(totals.incomeTotal)}</div>
+                    <div className="mt-2 text-xs text-slate-400">แหล่งรายได้ {(currentSheet.incomes || []).filter(i => i.amount > 0).length} รายการ</div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-rose-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-rose-500/35">
+                    <div className="text-xs font-semibold text-rose-400 mb-2">รวมรายจ่ายของเดือนนี้</div>
+                    <div className="text-2xl font-bold text-rose-400 font-mono">฿{formatCurrency(totals.totalAllExpenses)}</div>
+                    <div className="mt-2 text-xs text-slate-400">จ่ายแล้ว ฿{formatCurrency(totals.essentialPaidTotal + totals.investmentPaidTotal)}</div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-blue-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-blue-500/35">
+                    <div className="text-xs font-semibold text-blue-400 mb-2">เงินลงทุน</div>
+                    <div className="text-2xl font-bold text-blue-400 font-mono">฿{formatCurrency(totals.investmentTotal)}</div>
+                    <div className="mt-2 text-xs text-slate-400">สัดส่วน {calcExpensePercent(totals.investmentTotal)}</div>
+                  </div>
+
+                  <div className={`p-5 rounded-2xl border ${totals.netRemaining >= 0 ? 'bg-gradient-to-br from-blue-950/60 via-[#111827] to-[#111827] border-blue-500/50' : 'bg-gradient-to-br from-rose-950/50 via-[#111827] to-[#111827] border-rose-500/50'}`}>
+                    <div className="text-xs font-semibold text-slate-200 mb-2">TOTAL เงินคงเหลือทั้งหมด</div>
+                    <div className={`text-2xl font-extrabold font-mono ${totals.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                      {totals.netRemaining > 0 ? '+' : ''}฿{formatCurrency(totals.netRemaining)}
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">รายได้รวม − รายจ่ายรวม</div>
+                  </div>
+                </div>
+
+                {/* Search & Filter */}
+                <div className="bg-[#111827]/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+                  <div className="text-xs text-slate-300 font-medium">
+                    ตารางจัดการงบประมาณทั้ง 4 หัวข้อ (หลอดพลังแสดงเฉพาะข้อ 1 และ 2 เทียบกับรายได้รวมข้อ 3)
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="relative">
+                      <IconSearch className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="ค้นหารายการ..."
+                        className="pl-8 pr-3 py-1.5 bg-[#090D16] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setHideZeroRows(!hideZeroRows)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium border cursor-pointer ${
+                        hideZeroRows ? 'bg-blue-600/20 border-blue-500/50 text-blue-300' : 'bg-[#090D16] border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {hideZeroRows ? 'แสดงเฉพาะยอด > 0' : 'ซ่อนรายการที่เป็น 0.00'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4 Main Tables (2x2 Grid) */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                  {/* 1. รายจ่ายจำเป็น (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
+                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-blue-950/30 via-transparent to-transparent">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base font-bold text-white">1. รายจ่ายจำเป็น</h2>
+                          <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.essentialPendingCount}</span>
+                          <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.essentialPaidCount}</span>
+                        </div>
+                        <p className="text-xs text-slate-400">ค่าใช้จ่ายประจำเดือน ค่าบ้าน ค่ารถ และบิลบัตรต่างๆ</p>
+                      </div>
+                      <button type="button" onClick={addEssentialRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มรายการ
+                      </button>
+                    </div>
+
+                    {/* หลอดพลัง ข้อ 1 (Dark SaaS UI Style) */}
+                    {(() => {
+                      const incomeFull = totals.incomeTotal;
+                      const usedAmt = totals.essentialTotal;
+                      const usedPctOfIncome = incomeFull > 0 ? (usedAmt / incomeFull) * 100 : 0;
+                      const limitAmt = (incomeFull * essentialLimitPct) / 100;
+                      const isOverLimit = usedPctOfIncome > essentialLimitPct;
+                      const remainUnderLimit = limitAmt - usedAmt;
+
+                      return (
+                        <div className={`px-5 py-3.5 border-b transition-colors space-y-2.5 ${
+                          isOverLimit ? 'bg-rose-950/20 border-rose-500/30' : 'bg-[#090D16]/90 border-slate-800/80'
+                        }`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-200">⚡ หลอดพลังเพดานงบรายจ่ายจำเป็น:</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-mono font-bold text-[11px] border ${
+                                  isOverLimit
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                                    : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                }`}
+                              >
+                                เพดาน {essentialLimitPct}% (฿{formatCurrency(limitAmt)})
+                              </span>
+                            </div>
+                            <div className="font-mono text-xs">
+                              <span className="text-slate-400">รายจ่ายรวม: </span>
+                              <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-white font-bold'}>
+                                ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
+                              </span>
+                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 3): ฿{formatCurrency(incomeFull)}</span>
+                            </div>
+                          </div>
+
+                          {/* ตัวหลอดพลัง + เส้นขีดสีเหลืองบอกตำแหน่งเพดานที่ชัดเจน */}
+                          <div className="relative pt-4 pb-1">
+                            {/* ป้ายกำกับเหนือเส้นเพดาน */}
+                            <div
+                              style={{ left: `${Math.min(96, Math.max(4, essentialLimitPct))}%` }}
+                              className="absolute top-0 -translate-x-1/2 z-20 pointer-events-none"
+                            >
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold whitespace-nowrap border shadow ${
+                                isOverLimit
+                                  ? 'bg-rose-600 text-white border-rose-300'
+                                  : 'bg-amber-400 text-slate-950 border-amber-200'
+                              }`}>
+                                เพดาน {essentialLimitPct}%
+                              </span>
+                            </div>
+
+                            <div className="relative h-4 bg-[#060911] rounded-full overflow-hidden border border-slate-800 shadow-inner">
+                              {/* โซนปลอดภัยก่อนถึงเส้นเพดาน */}
+                              <div
+                                style={{ width: `${Math.min(100, essentialLimitPct)}%` }}
+                                className="absolute inset-y-0 left-0 bg-slate-800/35 pointer-events-none"
+                              />
+                              {/* แท่งพลังรายจ่ายจริง */}
+                              <div
+                                style={{ width: `${Math.min(100, usedPctOfIncome)}%` }}
+                                className={`h-full transition-all duration-300 ${
+                                  isOverLimit
+                                    ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-rose-600 shadow-[0_0_12px_rgba(244,63,94,0.6)]'
+                                    : 'bg-gradient-to-r from-blue-600 via-blue-500 to-cyan-400 shadow-[0_0_12px_rgba(59,130,246,0.45)]'
+                                }`}
+                              />
+                            </div>
+
+                            {/* เส้นขีดบอกเพดานแนวตั้งชัดเจน */}
+                            <div
+                              style={{ left: `${Math.min(100, essentialLimitPct)}%` }}
+                              className="absolute top-3.5 bottom-0 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] z-20 pointer-events-none"
+                            />
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
+                            <div className="flex items-center gap-2.5 flex-1">
+                              <span className="text-[11px] text-slate-400 shrink-0">เลื่อนปรับเพดาน (%):</span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={essentialLimitPct}
+                                onChange={(e) => handleLimitPctChange('essentialLimitPct', e.target.value)}
+                                className="w-full max-w-[200px] accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                              />
+                              <span className="text-xs font-mono font-bold text-amber-300 w-10">{essentialLimitPct}%</span>
+                            </div>
+                            <div className="text-[11px] font-mono">
+                              {isOverLimit ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold">
+                                  ⚠️ เกินเพดานที่ตั้งไว้ ฿{formatCurrency(Math.abs(remainUnderLimit))} (+{(usedPctOfIncome - essentialLimitPct).toFixed(1)}%)
+                                </span>
+                              ) : (
+                                <span className="text-emerald-400">
+                                  ✓ ยังใช้ได้อีก ฿{formatCurrency(Math.max(0, remainUnderLimit))} ก่อนถึงเพดาน {essentialLimitPct}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
+                            <th className="py-2.5 px-2 w-10 text-center">#</th>
+                            <th className="py-2.5 px-2">รายการ</th>
+                            <th className="py-2.5 px-2">รายละเอียด</th>
+                            <th className="py-2.5 px-2 w-28 text-right">จำนวนเงิน (฿)</th>
+                            <th className="py-2.5 px-2 w-44 text-center">สถานะ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-sm">
+                          {filteredEssential.map((row) => {
+                            const status = migrateRowStatus(row);
+                            const isPending = status === 'pending';
+                            const isPaid = status === 'paid';
+                            return (
+                              <tr key={row.id} className={isPaid ? 'bg-rose-950/20' : isPending ? 'bg-amber-950/15' : 'hover:bg-slate-800/30'}>
+                                <td className="py-2 px-1.5 text-center">
+                                  <input type="text" value={row.no} onChange={(e) => handleEssentialChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.item} placeholder="ชื่อรายการ..." onChange={(e) => handleEssentialChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.detail} placeholder="รายละเอียด..." onChange={(e) => handleEssentialChange(row.id, 'detail', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 focus:bg-[#090D16] focus:outline-none text-xs" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <EditableNumberCell value={row.amount} status={status} onChange={(val) => handleEssentialChange(row.id, 'amount', val)} />
+                                </td>
+                                <td className="py-2 px-2">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button type="button" onClick={() => handleEssentialChange(row.id, 'status', isPending ? 'none' : 'pending')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPending ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                      <IconClock className="w-3 h-3" /> รอจ่าย
+                                    </button>
+                                    <button type="button" onClick={() => handleEssentialChange(row.id, 'status', isPaid ? 'none' : 'paid')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPaid ? 'bg-rose-600 text-white border-rose-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                      <IconCheck className="w-3 h-3" /> จ่ายแล้ว
+                                    </button>
+                                    <button type="button" onClick={() => deleteEssentialRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
+                                      <IconTrash className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Total รายจ่ายจำเป็น</span>
+                      <div className="text-lg font-bold font-mono text-white">฿{formatCurrency(totals.essentialTotal)}</div>
+                    </div>
+                  </section>
+
+                  {/* 2. เงินลงทุน (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
+                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-cyan-950/30 via-transparent to-transparent">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-base font-bold text-white">2. เงินลงทุน</h2>
+                          <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.investmentPendingCount}</span>
+                          <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.investmentPaidCount}</span>
+                        </div>
+                        <p className="text-xs text-slate-400">งบลงทุนรายเดือน DCA กองทุน หุ้น และเงินสำรองฉุกเฉิน</p>
+                      </div>
+                      <button type="button" onClick={addInvestmentRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มพอร์ตลงทุน
+                      </button>
+                    </div>
+
+                    {/* หลอดพลัง ข้อ 2 (Dark SaaS UI Style) */}
+                    {(() => {
+                      const incomeFull = totals.incomeTotal;
+                      const usedAmt = totals.investmentTotal;
+                      const usedPctOfIncome = incomeFull > 0 ? (usedAmt / incomeFull) * 100 : 0;
+                      const limitAmt = (incomeFull * investmentLimitPct) / 100;
+                      const isOverLimit = usedPctOfIncome > investmentLimitPct;
+                      const diffAmt = limitAmt - usedAmt;
+
+                      return (
+                        <div className={`px-5 py-3.5 border-b transition-colors space-y-2.5 ${
+                          isOverLimit ? 'bg-rose-950/20 border-rose-500/30' : 'bg-[#090D16]/90 border-slate-800/80'
+                        }`}>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-slate-200">⚡ หลอดพลังเพดานงบเงินลงทุน:</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md font-mono font-bold text-[11px] border ${
+                                  isOverLimit
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40 animate-pulse'
+                                    : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                }`}
+                              >
+                                เพดาน {investmentLimitPct}% (฿{formatCurrency(limitAmt)})
+                              </span>
+                            </div>
+                            <div className="font-mono text-xs">
+                              <span className="text-slate-400">ลงทุนรวม: </span>
+                              <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-cyan-300 font-bold'}>
+                                ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
+                              </span>
+                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 3): ฿{formatCurrency(incomeFull)}</span>
+                            </div>
+                          </div>
+
+                          {/* ตัวหลอดพลัง + เส้นขีดสีเหลืองบอกตำแหน่งเพดานชัดเจน */}
+                          <div className="relative pt-4 pb-1">
+                            {/* ป้ายกำกับเหนือเส้นเพดาน */}
+                            <div
+                              style={{ left: `${Math.min(96, Math.max(4, investmentLimitPct))}%` }}
+                              className="absolute top-0 -translate-x-1/2 z-20 pointer-events-none"
+                            >
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold whitespace-nowrap border shadow ${
+                                isOverLimit
+                                  ? 'bg-rose-600 text-white border-rose-300'
+                                  : 'bg-amber-400 text-slate-950 border-amber-200'
+                              }`}>
+                                เพดาน {investmentLimitPct}%
+                              </span>
+                            </div>
+
+                            <div className="relative h-4 bg-[#060911] rounded-full overflow-hidden border border-slate-800 shadow-inner">
+                              <div
+                                style={{ width: `${Math.min(100, investmentLimitPct)}%` }}
+                                className="absolute inset-y-0 left-0 bg-slate-800/35 pointer-events-none"
+                              />
+                              <div
+                                style={{ width: `${Math.min(100, usedPctOfIncome)}%` }}
+                                className={`h-full transition-all duration-300 ${
+                                  isOverLimit
+                                    ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-rose-600 shadow-[0_0_12px_rgba(244,63,94,0.6)]'
+                                    : 'bg-gradient-to-r from-cyan-600 via-cyan-400 to-emerald-400 shadow-[0_0_12px_rgba(34,211,238,0.45)]'
+                                }`}
+                              />
+                            </div>
+
+                            {/* เส้นขีดบอกเพดานแนวตั้งชัดเจน */}
+                            <div
+                              style={{ left: `${Math.min(100, investmentLimitPct)}%` }}
+                              className="absolute top-3.5 bottom-0 w-0.5 bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] z-20 pointer-events-none"
+                            />
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
+                            <div className="flex items-center gap-2.5 flex-1">
+                              <span className="text-[11px] text-slate-400 shrink-0">เลื่อนปรับเพดาน (%):</span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={investmentLimitPct}
+                                onChange={(e) => handleLimitPctChange('investmentLimitPct', e.target.value)}
+                                className="w-full max-w-[200px] accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                              />
+                              <span className="text-xs font-mono font-bold text-amber-300 w-10">{investmentLimitPct}%</span>
+                            </div>
+                            <div className="text-[11px] font-mono">
+                              {isOverLimit ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/20 border border-rose-500/40 text-rose-300 font-semibold">
+                                  ⚠️ เกินเพดานที่ตั้งไว้ ฿{formatCurrency(Math.abs(diffAmt))} (+{(usedPctOfIncome - investmentLimitPct).toFixed(1)}%)
+                                </span>
+                              ) : (
+                                <span className="text-cyan-300">
+                                  ✓ ยังเพิ่มงบลงทุนได้อีก ฿{formatCurrency(Math.max(0, diffAmt))} ตามเป้า {investmentLimitPct}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
+                            <th className="py-2.5 px-2 w-10 text-center">#</th>
+                            <th className="py-2.5 px-2">รายการลงทุน</th>
+                            <th className="py-2.5 px-2">รายละเอียด</th>
+                            <th className="py-2.5 px-2 w-28 text-right">Budget (฿)</th>
+                            <th className="py-2.5 px-2 w-44 text-center">สถานะ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-sm">
+                          {filteredInvestments.map((row) => {
+                            const status = migrateRowStatus(row);
+                            const isPending = status === 'pending';
+                            const isPaid = status === 'paid';
+                            return (
+                              <tr key={row.id} className={isPaid ? 'bg-rose-950/20' : isPending ? 'bg-amber-950/15' : 'hover:bg-slate-800/30'}>
+                                <td className="py-2 px-1.5 text-center">
+                                  <input type="text" value={row.no} onChange={(e) => handleInvestmentChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.item} placeholder="ชื่อสินทรัพย์..." onChange={(e) => handleInvestmentChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.detail} placeholder="รายละเอียด..." onChange={(e) => handleInvestmentChange(row.id, 'detail', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 focus:bg-[#090D16] focus:outline-none text-xs" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <EditableNumberCell value={row.amount} status={status} onChange={(val) => handleInvestmentChange(row.id, 'amount', val)} />
+                                </td>
+                                <td className="py-2 px-2">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button type="button" onClick={() => handleInvestmentChange(row.id, 'status', isPending ? 'none' : 'pending')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPending ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                      <IconClock className="w-3 h-3" /> รอจ่าย
+                                    </button>
+                                    <button type="button" onClick={() => handleInvestmentChange(row.id, 'status', isPaid ? 'none' : 'paid')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPaid ? 'bg-rose-600 text-white border-rose-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                      <IconCheck className="w-3 h-3" /> จ่ายแล้ว
+                                    </button>
+                                    <button type="button" onClick={() => deleteInvestmentRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
+                                      <IconTrash className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">Total เงินลงทุน</span>
+                      <div className="text-lg font-bold font-mono text-cyan-400">฿{formatCurrency(totals.investmentTotal)}</div>
+                    </div>
+                  </section>
+
+                  {/* 3. รวมรายได้ของเดือนนี้ (ไม่มีหลอดพลัง) */}
+                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-emerald-950/30 via-transparent to-transparent">
+                      <div>
+                        <h2 className="text-base font-bold text-white">3. รวมรายได้ของเดือนนี้</h2>
+                        <p className="text-xs text-slate-400">กรอกข้อมูลแหล่งรายรับของเดือนนี้ (ไม่มีหลอดพลัง)</p>
+                      </div>
+                      <button type="button" onClick={addIncomeRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มแหล่งรายได้
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
+                            <th className="py-2.5 px-2 w-10 text-center">#</th>
+                            <th className="py-2.5 px-2">แหล่งรายได้</th>
+                            <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
+                            <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
+                            <th className="py-2.5 px-2 w-12 text-center">ลบ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-sm">
+                          {filteredIncomes.map((row) => {
+                            const pctNum = totals.incomeTotal > 0 ? ((Number(row.amount) || 0) / totals.incomeTotal) * 100 : 0;
+                            return (
+                              <tr key={row.id} className="hover:bg-slate-800/30">
+                                <td className="py-2 px-1.5 text-center">
+                                  <input type="text" value={row.no} onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.source} placeholder="ชื่อแหล่งรายได้..." onChange={(e) => handleIncomeChange(row.id, 'source', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
+                                </td>
+                                <td className="py-2 px-2 text-right font-mono text-xs text-blue-400">{pctNum.toFixed(2)}%</td>
+                                <td className="py-2 px-1.5">
+                                  <EditableNumberCell value={row.amount} onChange={(val) => handleIncomeChange(row.id, 'amount', val)} />
+                                </td>
+                                <td className="py-2 px-2 text-center">
+                                  <button type="button" onClick={() => deleteIncomeRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
+                                    <IconTrash className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">รวมรายได้ทั้งหมด</span>
+                      <div className="text-lg font-bold font-mono text-emerald-400">฿{formatCurrency(totals.incomeTotal)}</div>
+                    </div>
+                  </section>
+
+                  {/* 4. รวมรายจ่ายของเดือนนี้ (ไม่มีหลอดพลัง) */}
+                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-rose-950/30 via-transparent to-transparent">
+                      <div>
+                        <h2 className="text-base font-bold text-white">4. รวมรายจ่ายของเดือนนี้</h2>
+                        <p className="text-xs text-slate-400">ซิงค์ยอดข้อ 1 + ข้อ 2 อัตโนมัติ และเพิ่มรายจ่ายเสริมได้ (ไม่มีหลอดพลัง)</p>
+                      </div>
+                      <button type="button" onClick={addExtraExpenseRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มรายจ่ายเสริม
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
+                            <th className="py-2.5 px-2 w-10 text-center">#</th>
+                            <th className="py-2.5 px-2">หมวดหมู่รายจ่าย</th>
+                            <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
+                            <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
+                            <th className="py-2.5 px-2 w-12 text-center">ลบ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-sm">
+                          <tr className="bg-blue-950/15">
+                            <td className="py-2.5 px-2 text-center font-mono text-xs text-blue-400">1</td>
+                            <td className="py-2.5 px-2 font-medium text-slate-100">ค่าใช้จ่ายจำเป็น (Auto-Sync)</td>
+                            <td className="py-2.5 px-2 text-right font-mono text-xs text-rose-400">{calcExpensePercent(totals.essentialTotal)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-slate-100">{formatCurrency(totals.essentialTotal)}</td>
+                            <td className="py-2.5 px-2 text-center text-slate-600">—</td>
+                          </tr>
+                          <tr className="bg-cyan-950/15">
+                            <td className="py-2.5 px-2 text-center font-mono text-xs text-cyan-400">2</td>
+                            <td className="py-2.5 px-2 font-medium text-slate-100">ลงทุน , เงินเก็บ (Auto-Sync)</td>
+                            <td className="py-2.5 px-2 text-right font-mono text-xs text-cyan-400">{calcExpensePercent(totals.investmentTotal)}</td>
+                            <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-cyan-300">{formatCurrency(totals.investmentTotal)}</td>
+                            <td className="py-2.5 px-2 text-center text-slate-600">—</td>
+                          </tr>
+                          {filteredExtraExpenses.map((row) => (
+                            <tr key={row.id} className="hover:bg-slate-800/30">
+                              <td className="py-2 px-1.5 text-center">
+                                <input type="text" value={row.no} onChange={(e) => handleExtraExpenseChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
+                              </td>
+                              <td className="py-2 px-1.5">
+                                <input type="text" value={row.item} placeholder="รายการรายจ่ายเสริม..." onChange={(e) => handleExtraExpenseChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
+                              </td>
+                              <td className="py-2 px-2 text-right font-mono text-xs text-rose-300">{calcExpensePercent(row.amount)}</td>
+                              <td className="py-2 px-1.5">
+                                <EditableNumberCell value={row.amount} onChange={(val) => handleExtraExpenseChange(row.id, 'amount', val)} />
+                              </td>
+                              <td className="py-2 px-2 text-center">
+                                <button type="button" onClick={() => deleteExtraExpenseRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
+                                  <IconTrash className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">รวมรายจ่ายทั้งหมด</span>
+                      <div className="text-lg font-bold font-mono text-rose-400">฿{formatCurrency(totals.totalAllExpenses)}</div>
+                    </div>
+                  </section>
+                </div>
+              </>
+            ) : (
+              /* หน้าสรุปรายเดือน & กราฟเปรียบเทียบ */
+              <div className="space-y-6">
+                <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6">
+                  <h2 className="text-xl font-bold text-white mb-1">หัวข้อหลัก: รายรับรายจ่ายเงินคงเหลือทั้งหมด</h2>
+                  <p className="text-xs text-slate-400 mb-4">สามารถคลิกเพื่อแก้ไขข้อมูล เปลี่ยนชื่อเดือน หรือลบเดือนย้อนหลังได้ทุกเดือน</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {monthlySummaries.map((m) => (
+                      <div key={m.id} className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-white">{m.name}</span>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { setActiveSheetId(m.id); setActivePage('workspace'); }} className="px-2 py-1 rounded bg-blue-600 text-white text-xs cursor-pointer">แก้ข้อมูล</button>
+                            <button onClick={() => setEditMonthModal({ id: m.id, name: m.name })} className="p-1 text-slate-400 hover:text-blue-400 cursor-pointer"><IconEdit /></button>
+                            <button onClick={() => setDeleteMonthModal({ id: m.id, name: m.name })} className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"><IconTrash /></button>
+                          </div>
+                        </div>
+                        <div className="text-xs font-mono space-y-1">
+                          <div className="flex justify-between"><span>3. รวมรายได้:</span><span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span></div>
+                          <div className="flex justify-between"><span>1. รายจ่ายจำเป็น:</span><span className="text-rose-400">฿{formatCurrency(m.essentialTotal)}</span></div>
+                          <div className="flex justify-between"><span>2. เงินลงทุน:</span><span className="text-cyan-400">฿{formatCurrency(m.investmentTotal)}</span></div>
+                          <div className="flex justify-between border-t border-slate-800 pt-1 font-bold"><span>คงเหลือสุทธิ:</span><span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>฿{formatCurrency(m.netRemaining)}</span></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* Modal สร้างเดือนใหม่ */}
+          {newMonthModal && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800">
+                <h3 className="text-base font-bold text-white mb-3">สร้างงบประมาณเดือนใหม่</h3>
+                <form onSubmit={handleCreateNewMonth} className="space-y-4">
+                  <input
+                    type="text"
+                    required
+                    placeholder="เช่น ธ.ค. 2026"
+                    value={newMonthName}
+                    onChange={(e) => setNewMonthName(e.target.value)}
+                    className="w-full px-3.5 py-2 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white"
+                  />
+                  <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                    <input type="checkbox" checked={copyFromCurrent} onChange={(e) => setCopyFromCurrent(e.target.checked)} />
+                    <span>คัดลอกโครงสร้างรายการจากเดือนปัจจุบัน ({currentSheet.name})</span>
+                  </label>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setNewMonthModal(false)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+                    <button type="submit" className="px-4 py-2 text-xs font-semibold bg-blue-600 text-white rounded-xl">สร้างเดือนใหม่</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal แก้ไขชื่อเดือน */}
+          {editMonthModal && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800">
+                <h3 className="text-base font-bold text-white mb-3">แก้ไขชื่อเดือน</h3>
+                <form onSubmit={handleRenameMonth} className="space-y-4">
+                  <input
+                    type="text"
+                    required
+                    value={editMonthModal.name}
+                    onChange={(e) => setEditMonthModal({ ...editMonthModal, name: e.target.value })}
+                    className="w-full px-3.5 py-2 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setEditMonthModal(null)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+                    <button type="submit" className="px-4 py-2 text-xs font-semibold bg-blue-600 text-white rounded-xl">บันทึก</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal ยืนยันการลบเดือน */}
+          {deleteMonthModal && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800">
+                <h3 className="text-base font-bold text-white mb-2">ยืนยันการลบเดือน "{deleteMonthModal.name}"?</h3>
+                <p className="text-xs text-slate-400 mb-5">ข้อมูลในเดือนนี้จะถูกลบออกจากระบบ</p>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setDeleteMonthModal(null)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+                  <button type="button" onClick={() => handleDeleteMonthById(deleteMonthModal.id)} className="px-4 py-2 text-xs font-semibold bg-rose-600 text-white rounded-xl">ยืนยันลบเดือนนี้</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal ล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ */}
+          {cloudModal && (
+            <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+              <div className="bg-[#111827] rounded-2xl max-w-lg w-full p-6 border border-emerald-500/30">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-bold text-white">ตั้งค่าบัญชีอีเมลซิงค์ Cloud อัตโนมัติ</h3>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCloudModal(false);
+                      handleLogout();
+                    }}
+                    className="text-xs text-rose-400 hover:underline cursor-pointer"
+                  >
+                    ออกจากระบบ / สลับบัญชี
+                  </button>
+                </div>
+                <form onSubmit={handleSaveCloudSettings} className="space-y-4">
+                  <div className="bg-[#090D16] p-4 rounded-xl border border-emerald-500/30 space-y-2">
+                    <label className="block text-xs font-bold text-emerald-300">1. อีเมลของคุณ (ใช้ซิงค์ข้ามคอม/มือถืออัตโนมัติ)</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="เช่น yourname@gmail.com"
+                      value={inputCloudEmail}
+                      onChange={(e) => setInputCloudEmail(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-[#111827] border border-slate-700 rounded-xl text-sm text-white font-mono"
+                    />
+                  </div>
+                  <div className="bg-[#090D16]/70 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <label className="block text-xs font-semibold text-slate-300">2. Google Apps Script Web App URL (เสริม - ไม่บังคับ)</label>
+                    <input
+                      type="url"
+                      placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                      value={inputGasUrl}
+                      onChange={(e) => setInputGasUrl(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-[#111827] border border-slate-800 rounded-xl text-xs text-slate-200 font-mono"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setCloudModal(false)} className="px-4 py-2 text-xs text-slate-400">ปิด</button>
+                    <button type="submit" className="px-4 py-2 text-xs font-semibold bg-emerald-600 text-white rounded-xl">บันทึก & ซิงค์ข้อมูล</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

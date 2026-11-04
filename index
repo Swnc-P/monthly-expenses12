@@ -2112,6 +2112,7 @@ export default function App() {
         ) : (
           /* Analytics Page */
           <div className="space-y-8">
+            {/* หัวข้อหลัก: รายรับรายจ่ายเงินคงเหลือทั้งหมด */}
             <div className="space-y-5">
               <div className="bg-gradient-to-r from-blue-950/40 via-[#111827]/95 to-[#111827]/95 border border-blue-500/30 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
                 <div>
@@ -2136,9 +2137,28 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* การ์ดสรุปสะสมทุกเดือน */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-[#111827]/95 border border-emerald-500/30 rounded-2xl p-5">
+                  <div className="text-xs text-emerald-400 font-semibold mb-1">รวมรายรับสะสมทุกเดือน</div>
+                  <div className="text-2xl font-bold font-mono text-emerald-400">฿{formatCurrency(overallStats.totalIncomeAll)}</div>
+                </div>
+                <div className="bg-[#111827]/95 border border-rose-500/30 rounded-2xl p-5">
+                  <div className="text-xs text-rose-400 font-semibold mb-1">รวมรายจ่ายสะสมทุกเดือน</div>
+                  <div className="text-2xl font-bold font-mono text-rose-400">฿{formatCurrency(overallStats.totalExpenseAll)}</div>
+                </div>
+                <div className="bg-[#111827]/95 border border-blue-500/30 rounded-2xl p-5">
+                  <div className="text-xs text-blue-400 font-semibold mb-1">เงินคงเหลือสุทธิสะสม</div>
+                  <div className={`text-2xl font-bold font-mono ${overallStats.totalNetAll >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                    {overallStats.totalNetAll > 0 ? '+' : ''}฿{formatCurrency(overallStats.totalNetAll)}
+                  </div>
+                </div>
+              </div>
+
+              {/* ตารางและปุ่มจัดการเดือนย้อนหลัง */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {monthlySummaries.map((m) => (
-                  <div key={m.id} className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl p-5 space-y-3">
+                  <div key={m.id} className="bg-[#111827]/95 border border-slate-800/90 hover:border-slate-700 rounded-2xl p-5 space-y-3 transition-all">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white">{m.name}</span>
                       <div className="flex items-center gap-1">
@@ -2148,7 +2168,7 @@ export default function App() {
                             setActiveSheetId(m.id);
                             setActivePage('workspace');
                           }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 text-white cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
                         >
                           แก้ข้อมูล
                         </button>
@@ -2168,19 +2188,259 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                    <div className="text-xs font-mono space-y-1 text-slate-300">
-                      <div className="flex justify-between"><span>3. รวมรายได้:</span><span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span></div>
+                    <div className="text-xs font-mono space-y-1.5 text-slate-300">
+                      <div className="flex justify-between"><span>3. รวมรายได้:</span><span className="text-emerald-400 font-semibold">฿{formatCurrency(m.incomeTotal)}</span></div>
                       <div className="flex justify-between"><span>1. รายจ่ายจำเป็น:</span><span className="text-rose-400">฿{formatCurrency(m.essentialTotal)}</span></div>
                       <div className="flex justify-between"><span>2. เงินลงทุน:</span><span className="text-cyan-400">฿{formatCurrency(m.investmentTotal)}</span></div>
-                      <div className="flex justify-between border-t border-slate-800 pt-1 font-bold"><span>คงเหลือสุทธิ:</span><span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>฿{formatCurrency(m.netRemaining)}</span></div>
+                      <div className="flex justify-between"><span>4. รายจ่ายรวมทั้งหมด:</span><span className="text-rose-300">฿{formatCurrency(m.totalAllExpenses)}</span></div>
+                      <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold">
+                        <span>คงเหลือสุทธิ:</span>
+                        <span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>
+                          {m.netRemaining > 0 ? '+' : ''}฿{formatCurrency(m.netRemaining)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* หัวข้อรอง: กราฟเปรียบเทียบหัวข้อย่อย 1. รายจ่ายจำเป็น, 2. เงินลงทุน, 3. รวมรายได้ */}
+            <div className="space-y-5">
+              <div className="bg-[#111827]/95 border border-slate-800 rounded-2xl p-6">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-semibold mb-2">
+                  <PieChart className="w-3.5 h-3.5" />
+                  หัวข้อรอง • Sub-Category Monthly Comparison Graphs
+                </div>
+                <h3 className="text-lg sm:text-xl font-bold text-white">
+                  กราฟเปรียบเทียบหัวข้อย่อย (1. รายจ่ายจำเป็น • 2. เงินลงทุน • 3. รวมรายได้) ของแต่ละเดือน
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  เปรียบเทียบแนวโน้มแต่ละหมวดหมู่แยกตามรายเดือน พร้อมสัดส่วนเปอร์เซ็นต์ต่อรายได้
+                </p>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+                  {/* กราฟ 1: รายจ่ายจำเป็น */}
+                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-blue-400">1. รายจ่ายจำเป็น</span>
+                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalEssentialAll)}</span>
+                    </div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const maxEss = Math.max(...monthlySummaries.map((m) => m.essentialTotal), 1);
+                        return monthlySummaries.map((m) => {
+                          const barW = Math.min(100, (m.essentialTotal / maxEss) * 100);
+                          const pctInc = m.incomeTotal > 0 ? (m.essentialTotal / m.incomeTotal) * 100 : 0;
+                          return (
+                            <div key={m.id} className="space-y-1">
+                              <div className="flex justify-between text-xs font-mono">
+                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
+                                <span className="text-blue-300">฿{formatCurrency(m.essentialTotal)} ({pctInc.toFixed(1)}%)</span>
+                              </div>
+                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-blue-600 to-rose-500 rounded-full transition-all duration-300" />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* กราฟ 2: เงินลงทุน */}
+                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-cyan-400">2. เงินลงทุน</span>
+                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalInvestmentAll)}</span>
+                    </div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const maxInv = Math.max(...monthlySummaries.map((m) => m.investmentTotal), 1);
+                        return monthlySummaries.map((m) => {
+                          const barW = Math.min(100, (m.investmentTotal / maxInv) * 100);
+                          const pctInc = m.incomeTotal > 0 ? (m.investmentTotal / m.incomeTotal) * 100 : 0;
+                          return (
+                            <div key={m.id} className="space-y-1">
+                              <div className="flex justify-between text-xs font-mono">
+                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
+                                <span className="text-cyan-300">฿{formatCurrency(m.investmentTotal)} ({pctInc.toFixed(1)}%)</span>
+                              </div>
+                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-300" />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* กราฟ 3: รวมรายได้ */}
+                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-bold text-emerald-400">3. รวมรายได้ของแต่ละเดือน</span>
+                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalIncomeAll)}</span>
+                    </div>
+                    <div className="space-y-3">
+                      {(() => {
+                        const maxInc = Math.max(...monthlySummaries.map((m) => m.incomeTotal), 1);
+                        return monthlySummaries.map((m) => {
+                          const barW = Math.min(100, (m.incomeTotal / maxInc) * 100);
+                          return (
+                            <div key={m.id} className="space-y-1">
+                              <div className="flex justify-between text-xs font-mono">
+                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
+                                <span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span>
+                              </div>
+                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-emerald-600 to-teal-400 rounded-full transition-all duration-300" />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </main>
+
+      {/* Modal สร้างเดือนใหม่ */}
+      {newMonthModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-3">สร้างงบประมาณเดือนใหม่</h3>
+            <form onSubmit={handleCreateNewMonth} className="space-y-4">
+              <input
+                type="text"
+                required
+                placeholder="เช่น ธ.ค. 2026"
+                value={newMonthName}
+                onChange={(e) => setNewMonthName(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={copyFromCurrent}
+                  onChange={(e) => setCopyFromCurrent(e.target.checked)}
+                />
+                <span>คัดลอกโครงสร้างรายการจากเดือนปัจจุบัน ({currentSheet.name})</span>
+              </label>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewMonthModal(false)}
+                  className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
+                >
+                  สร้างเดือนใหม่
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal แก้ไขชื่อเดือน */}
+      {editMonthModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-3">แก้ไขชื่อเดือน</h3>
+            <form onSubmit={handleRenameMonth} className="space-y-4">
+              <input
+                type="text"
+                required
+                value={editMonthModal.name}
+                onChange={(e) => setEditMonthModal({ ...editMonthModal, name: e.target.value })}
+                className="w-full px-3.5 py-2.5 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditMonthModal(null)}
+                  className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
+                >
+                  บันทึกชื่อใหม่
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal ยืนยันการลบเดือน */}
+      {deleteMonthModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-2">
+              ยืนยันการลบเดือน "{deleteMonthModal.name}"?
+            </h3>
+            <p className="text-xs text-slate-400 mb-5">
+              ข้อมูลในเดือนนี้จะถูกลบออกจากระบบและซิงค์อัปเดตไปยัง Cloud อัตโนมัติ
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteMonthModal(null)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteMonthById(deleteMonthModal.id)}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl cursor-pointer"
+              >
+                ยืนยันลบเดือนนี้
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal ยืนยันรีเซ็ตข้อมูล */}
+      {confirmResetModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+            <h3 className="text-base font-bold text-white mb-2">รีเซ็ตข้อมูลเดือนนี้กลับเป็นค่าเริ่มต้น?</h3>
+            <p className="text-xs text-slate-400 mb-5">
+              ข้อมูลในเดือน "{currentSheet.name}" จะถูกรีเซ็ตกลับเป็นรายการเริ่มต้น
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmResetModal(false)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleResetToDefault}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl cursor-pointer"
+              >
+                ยืนยันรีเซ็ต
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal ล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ */}
       {cloudModal && (

@@ -843,22 +843,22 @@
         const rows = [
           ['สรุปรายรับ-รายจ่าย:', currentSheet.name, 'บัญชี:', cloudEmail],
           [],
-          ['--- 1. รายจ่ายจำเป็น ---'],
-          ['ลำดับ', 'รายการ', 'รายละเอียด', 'จำนวนเงิน', 'สถานะ'],
-          ...(currentSheet.essentialExpenses || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
-          ['', 'รวมรายจ่ายจำเป็น', '', totals.essentialTotal],
-          [],
-          ['--- 2. เงินลงทุน ---'],
-          ['ลำดับ', 'รายการ', 'รายละเอียด', 'งบลงทุน', 'สถานะ'],
-          ...(currentSheet.investments || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
-          ['', 'รวมเงินลงทุน', '', totals.investmentTotal],
-          [],
-          ['--- 3. รวมรายได้ของเดือนนี้ ---'],
+          ['--- 1. รายได้ ---'],
           ['ลำดับ', 'แหล่งรายได้', 'จำนวนเงิน'],
           ...(currentSheet.incomes || []).map((r) => [r.no, r.source, r.amount]),
           ['', 'รายได้รวมทั้งหมด', totals.incomeTotal],
           [],
-          ['--- 4. รวมรายจ่ายของเดือนนี้ ---'],
+          ['--- 2. รายจ่ายจำเป็น ---'],
+          ['ลำดับ', 'รายการ', 'รายละเอียด', 'จำนวนเงิน', 'สถานะ'],
+          ...(currentSheet.essentialExpenses || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
+          ['', 'รวมรายจ่ายจำเป็น', '', totals.essentialTotal],
+          [],
+          ['--- 3. เงินลงทุน ---'],
+          ['ลำดับ', 'รายการ', 'รายละเอียด', 'งบลงทุน', 'สถานะ'],
+          ...(currentSheet.investments || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
+          ['', 'รวมเงินลงทุน', '', totals.investmentTotal],
+          [],
+          ['--- 4. รวมรายจ่ายและรายจ่ายพิเศษ ---'],
           ['1', 'ค่าใช้จ่ายจำเป็น', totals.essentialTotal],
           ['2', 'ลงทุน , เงินเก็บ', totals.investmentTotal],
           ...(currentSheet.extraExpenses || []).map((r) => [r.no, r.item, r.amount]),
@@ -1163,7 +1163,7 @@
                 {/* Search & Filter */}
                 <div className="bg-[#111827]/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
                   <div className="text-xs text-slate-300 font-medium">
-                    ตารางจัดการงบประมาณทั้ง 4 หัวข้อ (หลอดพลังแสดงเฉพาะข้อ 1 และ 2 เทียบกับรายได้รวมข้อ 3)
+                    ตารางจัดการงบประมาณทั้ง 4 หัวข้อ (หลอดพลังแสดงในข้อ 2 และ 3 เทียบกับรายได้รวมข้อ 1)
                   </div>
                   <div className="flex items-center gap-2.5">
                     <div className="relative">
@@ -1188,14 +1188,70 @@
                   </div>
                 </div>
 
-                {/* 4 Main Tables (2x2 Grid) */}
+                {/* 4 Main Tables (2x2 Grid) เรียงเป็น 1. รายได้, 2. รายจ่ายจำเป็น, 3. เงินลงทุน, 4. รวมรายจ่ายและรายจ่ายพิเศษ */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                  {/* 1. รายจ่ายจำเป็น (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
+                  {/* 1. รายได้ (ไม่มีหลอดพลัง) */}
+                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-emerald-950/30 via-transparent to-transparent">
+                      <div>
+                        <h2 className="text-base font-bold text-white">1. รายได้</h2>
+                        <p className="text-xs text-slate-400">กรอกข้อมูลแหล่งรายรับของเดือนนี้ (ไม่มีหลอดพลัง)</p>
+                      </div>
+                      <button type="button" onClick={addIncomeRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 cursor-pointer">
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มแหล่งรายได้
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
+                            <th className="py-2.5 px-2 w-10 text-center">#</th>
+                            <th className="py-2.5 px-2">แหล่งรายได้</th>
+                            <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
+                            <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
+                            <th className="py-2.5 px-2 w-12 text-center">ลบ</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-sm">
+                          {filteredIncomes.map((row) => {
+                            const pctNum = totals.incomeTotal > 0 ? ((Number(row.amount) || 0) / totals.incomeTotal) * 100 : 0;
+                            return (
+                              <tr key={row.id} className="hover:bg-slate-800/30">
+                                <td className="py-2 px-1.5 text-center">
+                                  <input type="text" value={row.no} onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
+                                </td>
+                                <td className="py-2 px-1.5">
+                                  <input type="text" value={row.source} placeholder="ชื่อแหล่งรายได้..." onChange={(e) => handleIncomeChange(row.id, 'source', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
+                                </td>
+                                <td className="py-2 px-2 text-right font-mono text-xs text-blue-400">{pctNum.toFixed(2)}%</td>
+                                <td className="py-2 px-1.5">
+                                  <EditableNumberCell value={row.amount} onChange={(val) => handleIncomeChange(row.id, 'amount', val)} />
+                                </td>
+                                <td className="py-2 px-2 text-center">
+                                  <button type="button" onClick={() => deleteIncomeRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
+                                    <IconTrash className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-400">รวมรายได้ทั้งหมด</span>
+                      <div className="text-lg font-bold font-mono text-emerald-400">฿{formatCurrency(totals.incomeTotal)}</div>
+                    </div>
+                  </section>
+
+                  {/* 2. รายจ่ายจำเป็น (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
                   <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
                     <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-blue-950/30 via-transparent to-transparent">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h2 className="text-base font-bold text-white">1. รายจ่ายจำเป็น</h2>
+                          <h2 className="text-base font-bold text-white">2. รายจ่ายจำเป็น</h2>
                           <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.essentialPendingCount}</span>
                           <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.essentialPaidCount}</span>
                         </div>
@@ -1206,7 +1262,7 @@
                       </button>
                     </div>
 
-                    {/* หลอดพลัง ข้อ 1 (Dark SaaS UI Style) */}
+                    {/* หลอดพลัง ข้อ 2. รายจ่ายจำเป็น (Dark SaaS UI Style) */}
                     {(() => {
                       const incomeFull = totals.incomeTotal;
                       const usedAmt = totals.essentialTotal;
@@ -1237,7 +1293,7 @@
                               <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-white font-bold'}>
                                 ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
                               </span>
-                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 3): ฿{formatCurrency(incomeFull)}</span>
+                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
                             </div>
                           </div>
 
@@ -1367,12 +1423,12 @@
                     </div>
                   </section>
 
-                  {/* 2. เงินลงทุน (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
+                  {/* 3. เงินลงทุน (มีหลอดพลัง + เส้นบอกเพดาน + ข้อความแจ้งเตือนเมื่อเกินเพดาน) */}
                   <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
                     <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-cyan-950/30 via-transparent to-transparent">
                       <div>
                         <div className="flex items-center gap-2">
-                          <h2 className="text-base font-bold text-white">2. เงินลงทุน</h2>
+                          <h2 className="text-base font-bold text-white">3. เงินลงทุน</h2>
                           <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.investmentPendingCount}</span>
                           <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.investmentPaidCount}</span>
                         </div>
@@ -1383,7 +1439,7 @@
                       </button>
                     </div>
 
-                    {/* หลอดพลัง ข้อ 2 (Dark SaaS UI Style) */}
+                    {/* หลอดพลัง ข้อ 3. เงินลงทุน (Dark SaaS UI Style) */}
                     {(() => {
                       const incomeFull = totals.incomeTotal;
                       const usedAmt = totals.investmentTotal;
@@ -1414,7 +1470,7 @@
                               <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-cyan-300 font-bold'}>
                                 ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
                               </span>
-                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 3): ฿{formatCurrency(incomeFull)}</span>
+                              <span className="text-slate-500"> / เต็มหลอด (ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
                             </div>
                           </div>
 
@@ -1542,71 +1598,15 @@
                     </div>
                   </section>
 
-                  {/* 3. รวมรายได้ของเดือนนี้ (ไม่มีหลอดพลัง) */}
-                  <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-                    <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-emerald-950/30 via-transparent to-transparent">
-                      <div>
-                        <h2 className="text-base font-bold text-white">3. รวมรายได้ของเดือนนี้</h2>
-                        <p className="text-xs text-slate-400">กรอกข้อมูลแหล่งรายรับของเดือนนี้ (ไม่มีหลอดพลัง)</p>
-                      </div>
-                      <button type="button" onClick={addIncomeRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 cursor-pointer">
-                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มแหล่งรายได้
-                      </button>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
-                            <th className="py-2.5 px-2 w-10 text-center">#</th>
-                            <th className="py-2.5 px-2">แหล่งรายได้</th>
-                            <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
-                            <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
-                            <th className="py-2.5 px-2 w-12 text-center">ลบ</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/60 text-sm">
-                          {filteredIncomes.map((row) => {
-                            const pctNum = totals.incomeTotal > 0 ? ((Number(row.amount) || 0) / totals.incomeTotal) * 100 : 0;
-                            return (
-                              <tr key={row.id} className="hover:bg-slate-800/30">
-                                <td className="py-2 px-1.5 text-center">
-                                  <input type="text" value={row.no} onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)} className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
-                                </td>
-                                <td className="py-2 px-1.5">
-                                  <input type="text" value={row.source} placeholder="ชื่อแหล่งรายได้..." onChange={(e) => handleIncomeChange(row.id, 'source', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
-                                </td>
-                                <td className="py-2 px-2 text-right font-mono text-xs text-blue-400">{pctNum.toFixed(2)}%</td>
-                                <td className="py-2 px-1.5">
-                                  <EditableNumberCell value={row.amount} onChange={(val) => handleIncomeChange(row.id, 'amount', val)} />
-                                </td>
-                                <td className="py-2 px-2 text-center">
-                                  <button type="button" onClick={() => deleteIncomeRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
-                                    <IconTrash className="w-3.5 h-3.5" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-
-                    <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
-                      <span className="text-xs font-semibold text-slate-400">รวมรายได้ทั้งหมด</span>
-                      <div className="text-lg font-bold font-mono text-emerald-400">฿{formatCurrency(totals.incomeTotal)}</div>
-                    </div>
-                  </section>
-
-                  {/* 4. รวมรายจ่ายของเดือนนี้ (ไม่มีหลอดพลัง) */}
+                  {/* 4. รวมรายจ่ายและรายจ่ายพิเศษ (ไม่มีหลอดพลัง) */}
                   <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
                     <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-rose-950/30 via-transparent to-transparent">
                       <div>
-                        <h2 className="text-base font-bold text-white">4. รวมรายจ่ายของเดือนนี้</h2>
-                        <p className="text-xs text-slate-400">ซิงค์ยอดข้อ 1 + ข้อ 2 อัตโนมัติ และเพิ่มรายจ่ายเสริมได้ (ไม่มีหลอดพลัง)</p>
+                        <h2 className="text-base font-bold text-white">4. รวมรายจ่ายและรายจ่ายพิเศษ</h2>
+                        <p className="text-xs text-slate-400">ซิงค์ยอดข้อ 2 + ข้อ 3 อัตโนมัติ และเพิ่มรายจ่ายพิเศษได้ (ไม่มีหลอดพลัง)</p>
                       </div>
                       <button type="button" onClick={addExtraExpenseRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
-                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มรายจ่ายเสริม
+                        <IconPlus className="w-3.5 h-3.5" /> เพิ่มรายจ่ายพิเศษ
                       </button>
                     </div>
 
@@ -1732,6 +1732,105 @@
                     </button>
                   </div>
 
+                  {/* กราฟแท่งเปรียบเทียบในหมวดหมู่ รายรับรายจ่ายเงินคงเหลือทั้งหมด */}
+                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-bold text-white">
+                          📊 กราฟแท่งเปรียบเทียบ รายรับ • รายจ่ายรวม • เงินคงเหลือสุทธิ ของแต่ละเดือน
+                        </h3>
+                        <p className="text-xs text-slate-400">คลิกที่กราฟของเดือนใดก็ได้เพื่อสลับไปแก้ไขตารางงบของเดือนนั้น</p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-4 text-xs">
+                        <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                          <span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block" /> 1. รายได้รวม
+                        </span>
+                        <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+                          <span className="w-3 h-3 rounded-sm bg-rose-500 inline-block" /> 4. รายจ่ายรวม
+                        </span>
+                        <span className="flex items-center gap-1.5 text-blue-400 font-medium">
+                          <span className="w-3 h-3 rounded-sm bg-blue-500 inline-block" /> คงเหลือสุทธิ
+                        </span>
+                      </div>
+                    </div>
+
+                    {(() => {
+                      const maxVal = Math.max(
+                        ...monthlySummaries.map((m) =>
+                          Math.max(m.incomeTotal, m.totalAllExpenses, Math.abs(m.netRemaining))
+                        ),
+                        1
+                      );
+
+                      return (
+                        <div className="overflow-x-auto">
+                          <div className="min-w-[520px] grid grid-cols-2 sm:grid-cols-4 gap-5 pt-4 pb-1 items-end">
+                            {monthlySummaries.map((m) => {
+                              const incH = Math.max(6, Math.round((m.incomeTotal / maxVal) * 150));
+                              const expH = Math.max(6, Math.round((m.totalAllExpenses / maxVal) * 150));
+                              const netH = Math.max(6, Math.round((Math.abs(m.netRemaining) / maxVal) * 150));
+                              const isPositive = m.netRemaining >= 0;
+
+                              return (
+                                <div
+                                  key={m.id}
+                                  onClick={() => {
+                                    setActiveSheetId(m.id);
+                                    setActivePage('workspace');
+                                  }}
+                                  className="group bg-[#111827]/80 hover:bg-[#111827] border border-slate-800 hover:border-blue-500/40 rounded-xl p-4 flex flex-col items-center transition cursor-pointer"
+                                >
+                                  <div className="h-44 w-full flex items-end justify-center gap-3 border-b border-slate-800 pb-2 px-2">
+                                    <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                      <span className="text-[10px] font-mono text-emerald-400 mb-1">
+                                        {(m.incomeTotal / 1000).toFixed(1)}k
+                                      </span>
+                                      <div
+                                        style={{ height: `${incH}px` }}
+                                        className="w-full rounded-t-lg bg-gradient-to-t from-emerald-600 to-emerald-400"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                      <span className="text-[10px] font-mono text-rose-400 mb-1">
+                                        {(m.totalAllExpenses / 1000).toFixed(1)}k
+                                      </span>
+                                      <div
+                                        style={{ height: `${expH}px` }}
+                                        className="w-full rounded-t-lg bg-gradient-to-t from-rose-600 to-rose-400"
+                                      />
+                                    </div>
+                                    <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                      <span className={`text-[10px] font-mono mb-1 ${isPositive ? 'text-blue-400' : 'text-amber-400'}`}>
+                                        {isPositive ? '+' : '-'}{(Math.abs(m.netRemaining) / 1000).toFixed(1)}k
+                                      </span>
+                                      <div
+                                        style={{ height: `${netH}px` }}
+                                        className={`w-full rounded-t-lg ${
+                                          isPositive
+                                            ? 'bg-gradient-to-t from-blue-600 to-cyan-400'
+                                            : 'bg-gradient-to-t from-amber-600 to-amber-400'
+                                        }`}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="mt-3 text-center w-full space-y-1">
+                                    <div className="text-sm font-bold text-white group-hover:text-blue-400">{m.name}</div>
+                                    <div className="text-[11px] font-mono flex items-center justify-between text-slate-400 px-1">
+                                      <span>คงเหลือ:</span>
+                                      <span className={`font-bold ${isPositive ? 'text-blue-400' : 'text-rose-400'}`}>
+                                        {isPositive ? '+' : ''}฿{formatCurrency(m.netRemaining)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     {monthlySummaries.map((m) => (
                       <div key={m.id} className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-2.5">
@@ -1744,10 +1843,10 @@
                           </div>
                         </div>
                         <div className="text-xs font-mono space-y-1">
-                          <div className="flex justify-between"><span>3. รวมรายได้:</span><span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span></div>
-                          <div className="flex justify-between"><span>1. รายจ่ายจำเป็น:</span><span className="text-rose-400">฿{formatCurrency(m.essentialTotal)}</span></div>
-                          <div className="flex justify-between"><span>2. เงินลงทุน:</span><span className="text-cyan-400">฿{formatCurrency(m.investmentTotal)}</span></div>
-                          <div className="flex justify-between"><span>4. รายจ่ายรวม:</span><span className="text-rose-300">฿{formatCurrency(m.totalAllExpenses)}</span></div>
+                          <div className="flex justify-between"><span>1. รายได้:</span><span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span></div>
+                          <div className="flex justify-between"><span>2. รายจ่ายจำเป็น:</span><span className="text-rose-400">฿{formatCurrency(m.essentialTotal)}</span></div>
+                          <div className="flex justify-between"><span>3. เงินลงทุน:</span><span className="text-cyan-400">฿{formatCurrency(m.investmentTotal)}</span></div>
+                          <div className="flex justify-between"><span>4. รวมรายจ่ายและพิเศษ:</span><span className="text-rose-300">฿{formatCurrency(m.totalAllExpenses)}</span></div>
                           <div className="flex justify-between border-t border-slate-800 pt-1 font-bold"><span>คงเหลือสุทธิ:</span><span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>฿{formatCurrency(m.netRemaining)}</span></div>
                         </div>
                       </div>
@@ -1755,21 +1854,43 @@
                   </div>
                 </div>
 
-                {/* หัวข้อรอง: กราฟเปรียบเทียบหัวข้อย่อย 1. รายจ่ายจำเป็น, 2. เงินลงทุน, 3. รวมรายได้ */}
+                {/* หัวข้อรอง: กราฟเปรียบเทียบหัวข้อย่อย 1. รายได้, 2. รายจ่ายจำเป็น, 3. เงินลงทุน */}
                 <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-5">
                   <div>
                     <span className="text-[11px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-0.5 rounded-full">
                       หัวข้อรอง • Sub-Category Comparison Graphs
                     </span>
                     <h3 className="text-lg font-bold text-white mt-1">
-                      กราฟเปรียบเทียบหัวข้อย่อย (1. รายจ่ายจำเป็น • 2. เงินลงทุน • 3. รวมรายได้) ของแต่ละเดือน
+                      กราฟเปรียบเทียบหัวข้อย่อย (1. รายได้ • 2. รายจ่ายจำเป็น • 3. เงินลงทุน) ของแต่ละเดือน
                     </h3>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* กราฟ 1: รายจ่ายจำเป็น */}
+                    {/* กราฟ 1: รายได้ */}
                     <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
-                      <div className="text-sm font-bold text-blue-400">1. รายจ่ายจำเป็น</div>
+                      <div className="text-sm font-bold text-emerald-400">1. รายได้ของแต่ละเดือน</div>
+                      {(() => {
+                        const maxInc = Math.max(...monthlySummaries.map((m) => m.incomeTotal), 1);
+                        return monthlySummaries.map((m) => {
+                          const barW = Math.min(100, (m.incomeTotal / maxInc) * 100);
+                          return (
+                            <div key={m.id} className="space-y-1">
+                              <div className="flex justify-between text-xs font-mono">
+                                <span className="text-slate-300 font-sans">{m.name}</span>
+                                <span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span>
+                              </div>
+                              <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-emerald-600 to-teal-400 rounded-full" />
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+
+                    {/* กราฟ 2: รายจ่ายจำเป็น */}
+                    <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
+                      <div className="text-sm font-bold text-blue-400">2. รายจ่ายจำเป็น</div>
                       {(() => {
                         const maxEss = Math.max(...monthlySummaries.map((m) => m.essentialTotal), 1);
                         return monthlySummaries.map((m) => {
@@ -1790,9 +1911,9 @@
                       })()}
                     </div>
 
-                    {/* กราฟ 2: เงินลงทุน */}
+                    {/* กราฟ 3: เงินลงทุน */}
                     <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
-                      <div className="text-sm font-bold text-cyan-400">2. เงินลงทุน</div>
+                      <div className="text-sm font-bold text-cyan-400">3. เงินลงทุน</div>
                       {(() => {
                         const maxInv = Math.max(...monthlySummaries.map((m) => m.investmentTotal), 1);
                         return monthlySummaries.map((m) => {
@@ -1806,28 +1927,6 @@
                               </div>
                               <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
                                 <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full" />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-
-                    {/* กราฟ 3: รวมรายได้ */}
-                    <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
-                      <div className="text-sm font-bold text-emerald-400">3. รวมรายได้ของแต่ละเดือน</div>
-                      {(() => {
-                        const maxInc = Math.max(...monthlySummaries.map((m) => m.incomeTotal), 1);
-                        return monthlySummaries.map((m) => {
-                          const barW = Math.min(100, (m.incomeTotal / maxInc) * 100);
-                          return (
-                            <div key={m.id} className="space-y-1">
-                              <div className="flex justify-between text-xs font-mono">
-                                <span className="text-slate-300 font-sans">{m.name}</span>
-                                <span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span>
-                              </div>
-                              <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
-                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-emerald-600 to-teal-400 rounded-full" />
                               </div>
                             </div>
                           );

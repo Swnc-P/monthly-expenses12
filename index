@@ -28,7 +28,9 @@ import {
   Edit3,
   UserCheck,
   Mail,
-  LogOut
+  LogOut,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
@@ -331,6 +333,8 @@ export default function App() {
   const [deleteMonthModal, setDeleteMonthModal] = useState(null);
   const [confirmResetModal, setConfirmResetModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
+  const [draggedItem, setDraggedItem] = useState(null); // { listKey, id }
+  const [dragOverId, setDragOverId] = useState(null);
 
   // ระบบล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ
   const [cloudUser, setCloudUser] = useState(null);
@@ -783,6 +787,45 @@ export default function App() {
       ...sheet,
       extraExpenses: (sheet.extraExpenses || []).filter((r) => r.id !== id),
     }));
+  };
+
+  // ระบบคลิกค้างที่ปุ่มขีด 3 ขีด (☰) เพื่อลากสลับตำแหน่งแถวข้อมูล
+  const handleDragStartRow = (e, listKey, id) => {
+    setDraggedItem({ listKey, id });
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', id);
+    } catch (err) {}
+  };
+
+  const handleDragEnterRow = (listKey, targetId, startNo = 1) => {
+    if (!draggedItem || draggedItem.listKey !== listKey || draggedItem.id === targetId) return;
+    setDragOverId(targetId);
+
+    updateCurrentSheet((sheet) => {
+      const list = [...(sheet[listKey] || [])];
+      const fromIdx = list.findIndex((r) => r.id === draggedItem.id);
+      const toIdx = list.findIndex((r) => r.id === targetId);
+      if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return sheet;
+
+      const [moved] = list.splice(fromIdx, 1);
+      list.splice(toIdx, 0, moved);
+
+      const renumbered = list.map((item, i) => ({
+        ...item,
+        no: String(startNo + i),
+      }));
+
+      return {
+        ...sheet,
+        [listKey]: renumbered,
+      };
+    });
+  };
+
+  const handleDragEndRow = () => {
+    setDraggedItem(null);
+    setDragOverId(null);
   };
 
   const handleCreateNewMonth = (e) => {
@@ -1380,7 +1423,7 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
-                        <th className="py-2.5 px-2 w-10 text-center">#</th>
+                        <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">แหล่งรายได้</th>
                         <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
                         <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
@@ -1390,15 +1433,41 @@ export default function App() {
                     <tbody className="divide-y divide-slate-800/60 text-sm">
                       {filteredIncomes.map((row) => {
                         const pctNum = totals.incomeTotal > 0 ? ((Number(row.amount) || 0) / totals.incomeTotal) * 100 : 0;
+                        const isDragging = draggedItem?.listKey === 'incomes' && draggedItem?.id === row.id;
                         return (
-                          <tr key={row.id} className="hover:bg-slate-800/30 transition-colors">
+                          <tr
+                            key={row.id}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDragEnter={() => handleDragEnterRow('incomes', row.id, 1)}
+                            onDragEnd={handleDragEndRow}
+                            className={`transition-colors ${
+                              isDragging
+                                ? 'bg-emerald-500/20 opacity-60 ring-1 ring-emerald-500/50'
+                                : 'hover:bg-slate-800/30'
+                            }`}
+                          >
                             <td className="py-2 px-1.5 text-center">
-                              <input
-                                type="text"
-                                value={row.no}
-                                onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)}
-                                className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                              />
+                              <div className="flex items-center justify-center gap-1">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => handleDragStartRow(e, 'incomes', row.id)}
+                                  onDragEnd={handleDragEndRow}
+                                  title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
+                                  className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                                    <line x1="4" y1="7" x2="20" y2="7" />
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                    <line x1="4" y1="17" x2="20" y2="17" />
+                                  </svg>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={row.no}
+                                  onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)}
+                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
+                                />
+                              </div>
                             </td>
                             <td className="py-2 px-1.5">
                               <input
@@ -1577,7 +1646,7 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
-                        <th className="py-2.5 px-2 w-10 text-center">#</th>
+                        <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">รายการ</th>
                         <th className="py-2.5 px-2">รายละเอียด</th>
                         <th className="py-2.5 px-2 w-28 text-right">จำนวนเงิน (฿)</th>
@@ -1589,11 +1658,17 @@ export default function App() {
                         const status = migrateRowStatus(row);
                         const isPending = status === 'pending';
                         const isPaid = status === 'paid';
+                        const isDragging = draggedItem?.listKey === 'essentialExpenses' && draggedItem?.id === row.id;
                         return (
                           <tr
                             key={row.id}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDragEnter={() => handleDragEnterRow('essentialExpenses', row.id, 1)}
+                            onDragEnd={handleDragEndRow}
                             className={`transition-colors ${
-                              isPaid
+                              isDragging
+                                ? 'bg-blue-500/20 opacity-60 ring-1 ring-blue-500/50'
+                                : isPaid
                                 ? 'bg-rose-950/20 hover:bg-rose-950/30'
                                 : isPending
                                 ? 'bg-amber-950/15 hover:bg-amber-950/25'
@@ -1601,12 +1676,27 @@ export default function App() {
                             }`}
                           >
                             <td className="py-2 px-1.5 text-center">
-                              <input
-                                type="text"
-                                value={row.no}
-                                onChange={(e) => handleEssentialChange(row.id, 'no', e.target.value)}
-                                className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                              />
+                              <div className="flex items-center justify-center gap-1">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => handleDragStartRow(e, 'essentialExpenses', row.id)}
+                                  onDragEnd={handleDragEndRow}
+                                  title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
+                                  className="p-1 rounded-md text-slate-500 hover:text-blue-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                                    <line x1="4" y1="7" x2="20" y2="7" />
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                    <line x1="4" y1="17" x2="20" y2="17" />
+                                  </svg>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={row.no}
+                                  onChange={(e) => handleEssentialChange(row.id, 'no', e.target.value)}
+                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
+                                />
+                              </div>
                             </td>
                             <td className="py-2 px-1.5">
                               <input
@@ -1824,7 +1914,7 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
-                        <th className="py-2.5 px-2 w-10 text-center">#</th>
+                        <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">รายการลงทุน</th>
                         <th className="py-2.5 px-2">รายละเอียด / พอร์ต</th>
                         <th className="py-2.5 px-2 w-28 text-right">Budget (฿)</th>
@@ -1836,11 +1926,17 @@ export default function App() {
                         const status = migrateRowStatus(row);
                         const isPending = status === 'pending';
                         const isPaid = status === 'paid';
+                        const isDragging = draggedItem?.listKey === 'investments' && draggedItem?.id === row.id;
                         return (
                           <tr
                             key={row.id}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDragEnter={() => handleDragEnterRow('investments', row.id, 1)}
+                            onDragEnd={handleDragEndRow}
                             className={`transition-colors ${
-                              isPaid
+                              isDragging
+                                ? 'bg-cyan-500/20 opacity-60 ring-1 ring-cyan-500/50'
+                                : isPaid
                                 ? 'bg-rose-950/20 hover:bg-rose-950/30'
                                 : isPending
                                 ? 'bg-amber-950/15 hover:bg-amber-950/25'
@@ -1848,12 +1944,27 @@ export default function App() {
                             }`}
                           >
                             <td className="py-2 px-1.5 text-center">
-                              <input
-                                type="text"
-                                value={row.no}
-                                onChange={(e) => handleInvestmentChange(row.id, 'no', e.target.value)}
-                                className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                              />
+                              <div className="flex items-center justify-center gap-1">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => handleDragStartRow(e, 'investments', row.id)}
+                                  onDragEnd={handleDragEndRow}
+                                  title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
+                                  className="p-1 rounded-md text-slate-500 hover:text-cyan-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                                    <line x1="4" y1="7" x2="20" y2="7" />
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                    <line x1="4" y1="17" x2="20" y2="17" />
+                                  </svg>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={row.no}
+                                  onChange={(e) => handleInvestmentChange(row.id, 'no', e.target.value)}
+                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
+                                />
+                              </div>
                             </td>
                             <td className="py-2 px-1.5">
                               <input
@@ -1970,7 +2081,7 @@ export default function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
-                        <th className="py-2.5 px-2 w-10 text-center">#</th>
+                        <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">หมวดหมู่รายจ่าย</th>
                         <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
                         <th className="py-2.5 px-2 w-36 text-right">จำนวนเงิน (฿)</th>
@@ -2016,45 +2127,73 @@ export default function App() {
                         <td className="py-2.5 px-2 text-center text-xs text-slate-600">—</td>
                       </tr>
 
-                      {filteredExtraExpenses.map((row) => (
-                        <tr key={row.id} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="py-2 px-1.5 text-center">
-                            <input
-                              type="text"
-                              value={row.no}
-                              onChange={(e) => handleExtraExpenseChange(row.id, 'no', e.target.value)}
-                              className="w-full text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                            />
-                          </td>
-                          <td className="py-2 px-1.5">
-                            <input
-                              type="text"
-                              value={row.item}
-                              placeholder="รายการรายจ่ายเสริม..."
-                              onChange={(e) => handleExtraExpenseChange(row.id, 'item', e.target.value)}
-                              className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-right font-mono text-xs text-rose-300">
-                            {calcExpensePercent(row.amount)}
-                          </td>
-                          <td className="py-2 px-1.5">
-                            <EditableNumberCell
-                              value={row.amount}
-                              onChange={(val) => handleExtraExpenseChange(row.id, 'amount', val)}
-                            />
-                          </td>
-                          <td className="py-2 px-2 text-center">
-                            <button
-                              type="button"
-                              onClick={() => deleteExtraExpenseRow(row.id)}
-                              className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredExtraExpenses.map((row) => {
+                        const isDragging = draggedItem?.listKey === 'extraExpenses' && draggedItem?.id === row.id;
+                        return (
+                          <tr
+                            key={row.id}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDragEnter={() => handleDragEnterRow('extraExpenses', row.id, 3)}
+                            onDragEnd={handleDragEndRow}
+                            className={`transition-colors ${
+                              isDragging
+                                ? 'bg-rose-500/20 opacity-60 ring-1 ring-rose-500/50'
+                                : 'hover:bg-slate-800/30'
+                            }`}
+                          >
+                            <td className="py-2 px-1.5 text-center">
+                              <div className="flex items-center justify-center gap-1">
+                                <div
+                                  draggable
+                                  onDragStart={(e) => handleDragStartRow(e, 'extraExpenses', row.id)}
+                                  onDragEnd={handleDragEndRow}
+                                  title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
+                                  className="p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                                    <line x1="4" y1="7" x2="20" y2="7" />
+                                    <line x1="4" y1="12" x2="20" y2="12" />
+                                    <line x1="4" y1="17" x2="20" y2="17" />
+                                  </svg>
+                                </div>
+                                <input
+                                  type="text"
+                                  value={row.no}
+                                  onChange={(e) => handleExtraExpenseChange(row.id, 'no', e.target.value)}
+                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
+                                />
+                              </div>
+                            </td>
+                            <td className="py-2 px-1.5">
+                              <input
+                                type="text"
+                                value={row.item}
+                                placeholder="รายการรายจ่ายเสริม..."
+                                onChange={(e) => handleExtraExpenseChange(row.id, 'item', e.target.value)}
+                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                              />
+                            </td>
+                            <td className="py-2 px-2 text-right font-mono text-xs text-rose-300">
+                              {calcExpensePercent(row.amount)}
+                            </td>
+                            <td className="py-2 px-1.5">
+                              <EditableNumberCell
+                                value={row.amount}
+                                onChange={(val) => handleExtraExpenseChange(row.id, 'amount', val)}
+                              />
+                            </td>
+                            <td className="py-2 px-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => deleteExtraExpenseRow(row.id)}
+                                className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

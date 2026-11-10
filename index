@@ -1,59 +1,114 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
+  Sparkles,
+  Calendar,
   Plus,
   Trash2,
-  RotateCcw,
-  Download,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  FolderPlus,
-  Calendar,
-  Sparkles,
-  Link2,
-  TrendingUp,
-  Wallet,
-  CreditCard,
-  PieChart,
-  ArrowUpRight,
-  ArrowDownRight,
-  Filter,
-  Layers,
-  Search,
-  BarChart3,
-  LayoutGrid,
-  ExternalLink,
-  Cloud,
-  Key,
   Edit3,
-  UserCheck,
-  Mail,
+  Cloud,
+  Download,
+  RefreshCw,
+  Clock,
+  CheckCircle2,
+  Search,
   LogOut,
-  ChevronUp,
-  ChevronDown
+  Key,
+  AlertCircle,
+  Copy,
+  Code2,
+  GripVertical
 } from 'lucide-react';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// ตั้งค่าเชื่อมต่อ Cloud Storage อัตโนมัติ (Firestore)
-let firebaseApp = null;
-let cloudAuth = null;
-let cloudDb = null;
-const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'monthly-expenses-app';
+// โค้ด Google Apps Script (Code.gs) สำหรับให้ผู้ใช้กดคัดลอกได้จากในหน้าเว็บทันที
+const GAS_CODE_TEMPLATE = `var SHEET_MONTHS = 'DB_Months';
+var SHEET_CONFIG = 'DB_Config';
 
-try {
-  if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-    const firebaseConfig = JSON.parse(__firebase_config);
-    firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-    cloudAuth = getAuth(firebaseApp);
-    cloudDb = getFirestore(firebaseApp);
+function initDatabase() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var monthSheet = ss.getSheetByName(SHEET_MONTHS);
+  if (!monthSheet) {
+    monthSheet = ss.insertSheet(SHEET_MONTHS);
+    var headers = ['month_id','month_name','income_total','essential_total','investment_total','extra_total','net_remaining','updated_at','raw_json'];
+    monthSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    monthSheet.setFrozenRows(1);
   }
-} catch (e) {
-  console.warn('Cloud initialization skipped:', e);
+  var configSheet = ss.getSheetByName(SHEET_CONFIG);
+  if (!configSheet) {
+    configSheet = ss.insertSheet(SHEET_CONFIG);
+    configSheet.getRange(1, 1, 1, 3).setValues([['config_key', 'config_value', 'updated_at']]);
+    configSheet.setFrozenRows(1);
+  }
+  return { ss: ss, monthSheet: monthSheet, configSheet: configSheet };
 }
 
-// ข้อมูลเริ่มต้นของเดือนปัจจุบัน (พฤศจิกายน 2026) ตามโครงสร้างของผู้ใช้
+function doGet(e) {
+  try {
+    var db = initDatabase();
+    var lastRow = db.monthSheet.getLastRow();
+    var sheets = [];
+    if (lastRow > 1) {
+      var values = db.monthSheet.getRange(2, 1, lastRow - 1, 9).getValues();
+      for (var i = 0; i < values.length; i++) {
+        if (values[i][8]) {
+          try { sheets.push(JSON.parse(values[i][8])); } catch (err) {}
+        }
+      }
+    }
+    var activeSheetId = '';
+    if (db.configSheet.getLastRow() > 1) {
+      var configVals = db.configSheet.getRange(2, 1, db.configSheet.getLastRow() - 1, 2).getValues();
+      for (var j = 0; j < configVals.length; j++) {
+        if (configVals[j][0] === 'activeSheetId') { activeSheetId = configVals[j][1]; break; }
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success', sheets: sheets, activeSheetId: activeSheetId, serverTime: new Date().toISOString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(15000);
+    var db = initDatabase();
+    var rawBody = e.postData && e.postData.contents ? e.postData.contents : '{}';
+    var payload = JSON.parse(rawBody);
+    var sheets = Array.isArray(payload.sheets) ? payload.sheets : [];
+    var activeSheetId = payload.activeSheetId || (sheets[0] ? sheets[0].id : '');
+    var now = new Date().toISOString();
+
+    var rowsToWrite = sheets.map(function(sheet) {
+      var essentialTotal = (sheet.essentialExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var investmentTotal = (sheet.investments || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var incomeTotal = (sheet.incomes || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var extraTotal = (sheet.extraExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var netRemaining = incomeTotal - (essentialTotal + investmentTotal + extraTotal);
+      return [sheet.id || '', sheet.name || '', incomeTotal, essentialTotal, investmentTotal, extraTotal, netRemaining, now, JSON.stringify(sheet)];
+    });
+
+    if (db.monthSheet.getLastRow() > 1) {
+      db.monthSheet.getRange(2, 1, db.monthSheet.getLastRow() - 1, 9).clearContent();
+    }
+    if (rowsToWrite.length > 0) {
+      db.monthSheet.getRange(2, 1, rowsToWrite.length, 9).setValues(rowsToWrite);
+    }
+    db.configSheet.getRange(2, 1, 1, 3).setValues([['activeSheetId', activeSheetId, now]]);
+
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'success', savedCount: rowsToWrite.length, updatedAt: now
+    })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
+  }
+}`;
+
 const DEFAULT_SHEET_DATA = {
   id: 'nov-2026',
   name: 'พ.ย. 2026',
@@ -246,9 +301,7 @@ const EditableNumberCell = ({ value, onChange, status = 'none', placeholder = '0
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.target.blur();
-    }
+    if (e.key === 'Enter') e.target.blur();
   };
 
   const displayText = () => {
@@ -272,12 +325,12 @@ const EditableNumberCell = ({ value, onChange, status = 'none', placeholder = '0
           isFocused
             ? 'bg-[#090D16] border-blue-500 text-white ring-2 ring-blue-500/30'
             : status === 'paid'
-            ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 font-semibold shadow-[0_0_10px_rgba(244,63,94,0.15)] hover:border-rose-400'
+            ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 font-semibold hover:border-rose-400'
             : status === 'pending'
-            ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold shadow-[0_0_10px_rgba(245,158,11,0.15)] hover:border-amber-400'
+            ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-semibold hover:border-amber-400'
             : Number(value) > 0
-            ? 'bg-[#0D1322]/70 border-slate-800/80 text-slate-100 hover:border-slate-700 hover:bg-[#0D1322]'
-            : 'bg-transparent border-transparent text-slate-500 hover:border-slate-800 hover:bg-[#0D1322]/40'
+            ? 'bg-[#0D1322]/70 border-slate-800/80 text-slate-100 hover:border-slate-700'
+            : 'bg-transparent border-transparent text-slate-500 hover:border-slate-800'
         }`}
       />
     </div>
@@ -285,23 +338,28 @@ const EditableNumberCell = ({ value, onChange, status = 'none', placeholder = '0
 };
 
 export default function App() {
-  // ระบบล็อกอินด้วยอีเมลก่อนเข้าใช้งาน
-  const [cloudEmail, setCloudEmail] = useState(() => localStorage.getItem('monthly_expenses_cloud_email') || '');
-  const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem('monthly_expenses_cloud_email')));
-  const [loginEmailInput, setLoginEmailInput] = useState(() => localStorage.getItem('monthly_expenses_cloud_email') || '');
-  const [loginGasInput, setLoginGasInput] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || '');
-  const [showAdvancedGas, setShowAdvancedGas] = useState(false);
+  // หน้าบังคับกรอก URL Google Apps Script แทนการล็อกอินอีเมล
+  const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || '');
+  const [isUrlConnected, setIsUrlConnected] = useState(() => Boolean(localStorage.getItem('monthly_expenses_gas_url')));
+  const [gateGasInput, setGateGasInput] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || '');
+  const [gateError, setGateError] = useState('');
+  const [isConnectingGate, setIsConnectingGate] = useState(false);
+  const [isDemoPreview, setIsDemoPreview] = useState(false);
+  const [showCodeModal, setShowCodeModal] = useState(false);
 
-  const getStorageKey = (email) => {
-    const clean = String(email || 'default').trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
-    return `monthly_expenses_dark_v3_${clean}`;
+  // โหมดซิงค์ Auto (ค่าเริ่มต้นตอนล็อกอิน = ปิด เพื่อป้องกันการเซพทับข้อมูลเดิม)
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState(false);
+
+  const getStorageKey = (urlStr) => {
+    const clean = String(urlStr || 'default').trim().toLowerCase().replace(/[^a-z0-9]/g, '_').slice(-45);
+    return `monthly_expenses_gas_v4_${clean}`;
   };
 
   const [sheets, setSheets] = useState(() => {
     try {
-      const currentEmail = localStorage.getItem('monthly_expenses_cloud_email') || '';
-      const perUserSaved = currentEmail ? localStorage.getItem(getStorageKey(currentEmail)) : null;
-      const saved = perUserSaved || localStorage.getItem('monthly_expenses_dark_v3');
+      const currentUrl = localStorage.getItem('monthly_expenses_gas_url') || '';
+      const perUrlSaved = currentUrl ? localStorage.getItem(getStorageKey(currentUrl)) : null;
+      const saved = perUrlSaved || localStorage.getItem('monthly_expenses_dark_v3');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -325,161 +383,59 @@ export default function App() {
   const [activePage, setActivePage] = useState('workspace');
   const [hideZeroRows, setHideZeroRows] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [expensePercentMode, setExpensePercentMode] = useState('income');
+  const [expensePercentMode] = useState('income');
   const [newMonthModal, setNewMonthModal] = useState(false);
   const [newMonthName, setNewMonthName] = useState('');
   const [copyFromCurrent, setCopyFromCurrent] = useState(true);
   const [editMonthModal, setEditMonthModal] = useState(null);
   const [deleteMonthModal, setDeleteMonthModal] = useState(null);
-  const [confirmResetModal, setConfirmResetModal] = useState(false);
   const [toastMsg, setToastMsg] = useState(null);
-  const [draggedItem, setDraggedItem] = useState(null); // { listKey, id }
-  const [dragOverId, setDragOverId] = useState(null);
+  const [draggedItem, setDraggedItem] = useState(null);
 
-  // ระบบล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ
-  const [cloudUser, setCloudUser] = useState(null);
-  const [inputCloudEmail, setInputCloudEmail] = useState('');
-
-  const DEFAULT_GAS_URL = '';
-  const [gasUrl, setGasUrl] = useState(() => localStorage.getItem('monthly_expenses_gas_url') || DEFAULT_GAS_URL);
   const [cloudModal, setCloudModal] = useState(false);
   const [inputGasUrl, setInputGasUrl] = useState('');
   const [syncStatus, setSyncStatus] = useState('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
-  const isRemoteUpdateRef = React.useRef(false);
-  const isInitialFetchedRef = React.useRef(false);
-  const lastSavedHashRef = React.useRef('');
-
-  const normalizeEmailKey = (str) => {
-    return String(str || 'default').trim().toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
-  };
-
-  // 1. ยืนยันตัวตน Cloud อัตโนมัติเบื้องหลัง
-  useEffect(() => {
-    if (!cloudAuth) return;
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(cloudAuth, __initial_auth_token);
-        } else {
-          await signInAnonymously(cloudAuth);
-        }
-      } catch (err) {
-        console.warn('Cloud auth error:', err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(cloudAuth, (u) => {
-      setCloudUser(u);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. ดึงและซิงค์ข้อมูลแบบ Real-time จาก Cloud ตามอีเมลที่ล็อกอิน
-  useEffect(() => {
-    if (!cloudUser || !cloudDb || !cloudEmail || !isLoggedIn) return;
-    const docKey = `account_${normalizeEmailKey(cloudEmail)}`;
-    const docRef = doc(cloudDb, 'artifacts', currentAppId, 'public', 'data', 'user_budgets', docKey);
-
-    setSyncStatus('loading');
-    const unsubscribe = onSnapshot(
-      docRef,
-      (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data && data.sheetsJson && data.sheetsJson !== lastSavedHashRef.current) {
-            try {
-              const parsed = JSON.parse(data.sheetsJson);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                isRemoteUpdateRef.current = true;
-                lastSavedHashRef.current = data.sheetsJson;
-                setSheets(parsed);
-                if (data.activeSheetId) setActiveSheetId(data.activeSheetId);
-              }
-            } catch (e) {}
-          }
-          setLastSyncedAt(new Date());
-          setSyncStatus('synced');
-        } else {
-          const jsonStr = JSON.stringify(sheets);
-          lastSavedHashRef.current = jsonStr;
-          setDoc(docRef, {
-            email: cloudEmail,
-            sheetsJson: jsonStr,
-            activeSheetId: activeSheetId,
-            updatedAt: new Date().toISOString()
-          }).then(() => {
-            setLastSyncedAt(new Date());
-            setSyncStatus('synced');
-          }).catch(() => {});
-        }
-        isInitialFetchedRef.current = true;
-      },
-      (err) => {
-        console.warn('Cloud snapshot error:', err);
-        if (!gasUrl) setSyncStatus('idle');
-      }
-    );
-
-    return () => unsubscribe();
-  }, [cloudUser, cloudEmail, isLoggedIn]);
+  const isRemoteUpdateRef = useRef(false);
+  const isInitialFetchedRef = useRef(false);
 
   useEffect(() => {
     try {
       localStorage.setItem('monthly_expenses_dark_v3', JSON.stringify(sheets));
-      if (cloudEmail) {
-        localStorage.setItem(getStorageKey(cloudEmail), JSON.stringify(sheets));
+      if (gasUrl) {
+        localStorage.setItem(getStorageKey(gasUrl), JSON.stringify(sheets));
       }
       localStorage.setItem('monthly_expenses_active_id_v3', activeSheetId);
     } catch (e) {
       console.error('Failed to save to localStorage', e);
     }
-  }, [sheets, activeSheetId, cloudEmail]);
+  }, [sheets, activeSheetId, gasUrl]);
 
   const showToast = (msg) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const handleLoginSubmit = async (e) => {
-    e.preventDefault();
-    const trimmedEmail = loginEmailInput.trim().toLowerCase();
-    if (!trimmedEmail) return;
-
+  const copyCodeGsToClipboard = () => {
     try {
-      const savedForEmail = localStorage.getItem(getStorageKey(trimmedEmail));
-      if (savedForEmail) {
-        const parsed = JSON.parse(savedForEmail);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setSheets(parsed);
-        }
-      }
-    } catch (err) {}
-
-    setCloudEmail(trimmedEmail);
-    localStorage.setItem('monthly_expenses_cloud_email', trimmedEmail);
-
-    const trimmedGas = loginGasInput.trim();
-    if (trimmedGas) {
-      setGasUrl(trimmedGas);
-      localStorage.setItem('monthly_expenses_gas_url', trimmedGas);
+      const textarea = document.createElement('textarea');
+      textarea.value = GAS_CODE_TEMPLATE;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showToast('คัดลอกโค้ด Code.gs เรียบร้อยแล้ว นำไปวางใน Google Apps Script ได้เลย!');
+    } catch (e) {
+      showToast('ไม่สามารถคัดลอกอัตโนมัติได้ กรุณาคลุมดำแล้วกด Ctrl+C');
     }
-
-    setIsLoggedIn(true);
-    showToast(`เข้าสู่ระบบและซิงค์ข้อมูลกับ "${trimmedEmail}" เรียบร้อยแล้ว`);
-  };
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setLoginEmailInput(cloudEmail);
-    setLoginGasInput(gasUrl);
   };
 
   const fetchFromGoogleSheet = async (targetUrl = gasUrl, silent = false) => {
-    if (!targetUrl) return;
+    if (!targetUrl) return false;
     setSyncStatus('loading');
     try {
-      const response = await fetch(`${targetUrl}?t=${Date.now()}`, {
+      const sep = targetUrl.includes('?') ? '&' : '?';
+      const response = await fetch(`${targetUrl}${sep}t=${Date.now()}`, {
         method: 'GET',
         redirect: 'follow',
       });
@@ -499,10 +455,16 @@ export default function App() {
           }
           setLastSyncedAt(new Date());
           setSyncStatus('synced');
-          if (!silent) showToast(`ดึงข้อมูลจาก Google Sheets สำเร็จ (${normalized.length} เดือน)`);
+          isInitialFetchedRef.current = true;
+          if (!silent) showToast(`ดึงข้อมูลล่าสุดสำเร็จ (${normalized.length} เดือน) • โหมดซิงค์ Auto ปิดอยู่`);
+          return true;
         } else {
-          await pushToGoogleSheet(targetUrl, sheets, activeSheetId, true);
-          if (!silent) showToast('เชื่อมต่อสำเร็จ! อัปโหลดข้อมูลเริ่มต้นขึ้น Google Sheets แล้ว');
+          // กรณี Google Sheets ยังว่างเปล่า ห้ามเขียนทับอัตโนมัติเด็ดขาด (Fetch Only)
+          setLastSyncedAt(new Date());
+          setSyncStatus('idle');
+          isInitialFetchedRef.current = true;
+          if (!silent) showToast('เชื่อมต่อสำเร็จ (ยังไม่มีข้อมูลใน Google Sheets • กดปุ่ม "ซิงค์ Auto" เมื่อต้องการเริ่มบันทึก)');
+          return true;
         }
       } else {
         throw new Error(data?.message || 'Invalid response');
@@ -510,9 +472,8 @@ export default function App() {
     } catch (err) {
       console.error('Google Sheet Fetch Error:', err);
       setSyncStatus('error');
-      if (!silent) showToast('ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ กรุณาตรวจสอบ Web App URL');
-    } finally {
-      isInitialFetchedRef.current = true;
+      if (!silent) showToast('ไม่สามารถดึงข้อมูลจาก URL นี้ได้ กรุณาตรวจสอบสิทธิ์ Anyone และ /exec');
+      return false;
     }
   };
 
@@ -520,7 +481,6 @@ export default function App() {
     if (!targetUrl) return;
     setSyncStatus('saving');
     try {
-      // Ensure safe array payload
       const safeSheets = Array.isArray(sheetsData) ? sheetsData : [];
       const response = await fetch(targetUrl, {
         method: 'POST',
@@ -538,80 +498,111 @@ export default function App() {
       if (result && result.status === 'success') {
         setLastSyncedAt(new Date());
         setSyncStatus('synced');
-        if (!silent) showToast('บันทึกข้อมูลลง Google Sheets เรียบร้อยแล้ว');
+        if (!silent) showToast('บันทึกข้อมูลล่าสุดลง Google Apps Script เรียบร้อยแล้ว');
       } else {
         throw new Error(result?.message || 'Save failed');
       }
     } catch (err) {
       console.error('Google Sheet Save Error:', err);
       setSyncStatus('error');
-      if (!silent) showToast('บันทึกลง Google Sheets ไม่สำเร็จ');
+      if (!silent) showToast('บันทึกลง Google Apps Script ไม่สำเร็จ');
     }
   };
 
+  // เปิดเว็บขึ้นมา: ดึงข้อมูลอย่างเดียว (Fetch Only) และบังคับปิดโหมดซิงค์ Auto เสมอ
   useEffect(() => {
-    if (gasUrl) {
+    setIsAutoSyncEnabled(false);
+    if (gasUrl && isUrlConnected) {
       fetchFromGoogleSheet(gasUrl, true);
-    } else if (!cloudDb) {
-      isInitialFetchedRef.current = true;
     }
   }, []);
 
-  // 3. บันทึกอัตโนมัติ (Auto-Save) ขึ้น Cloud และ Google Sheet ทุกครั้งที่แก้ไข
+  // ซิงค์อัตโนมัติเฉพาะเมื่อผู้ใช้กดเปิดปุ่ม "ซิงค์ Auto" (isAutoSyncEnabled === true) เท่านั้น
   useEffect(() => {
+    if (!isAutoSyncEnabled || !gasUrl || !isUrlConnected || !isInitialFetchedRef.current) return;
     if (isRemoteUpdateRef.current) {
       isRemoteUpdateRef.current = false;
       return;
     }
 
-    const timer = setTimeout(async () => {
-      if (cloudUser && cloudDb && cloudEmail && isInitialFetchedRef.current) {
-        try {
-          setSyncStatus('saving');
-          const docKey = `account_${normalizeEmailKey(cloudEmail)}`;
-          const docRef = doc(cloudDb, 'artifacts', currentAppId, 'public', 'data', 'user_budgets', docKey);
-          const jsonStr = JSON.stringify(sheets);
-          lastSavedHashRef.current = jsonStr;
-          await setDoc(docRef, {
-            email: cloudEmail,
-            sheetsJson: jsonStr,
-            activeSheetId: activeSheetId,
-            updatedAt: new Date().toISOString()
-          });
-          setLastSyncedAt(new Date());
-          setSyncStatus('synced');
-        } catch (err) {
-          console.warn('Cloud save error:', err);
-        }
-      }
-
-      if (gasUrl && isInitialFetchedRef.current) {
-        pushToGoogleSheet(gasUrl, sheets, activeSheetId, true);
-      }
-    }, 900);
+    setSyncStatus('saving');
+    const timer = setTimeout(() => {
+      pushToGoogleSheet(gasUrl, sheets, activeSheetId, true);
+    }, 650);
 
     return () => clearTimeout(timer);
-  }, [sheets, activeSheetId, gasUrl, cloudUser, cloudEmail]);
+  }, [sheets, activeSheetId, gasUrl, isUrlConnected, isAutoSyncEnabled]);
+
+  // ปุ่มสลับเปิด/ปิดโหมด "ซิงค์ Auto"
+  const handleToggleAutoSync = async () => {
+    if (!isUrlConnected || !gasUrl) {
+      setInputGasUrl(gasUrl);
+      setCloudModal(true);
+      showToast('กรุณาเชื่อมต่อ URL Google Apps Script ก่อนเปิดใช้งานซิงค์ Auto');
+      return;
+    }
+
+    const nextState = !isAutoSyncEnabled;
+    setIsAutoSyncEnabled(nextState);
+
+    if (nextState) {
+      isInitialFetchedRef.current = true;
+      showToast('เปิดโหมด "ซิงค์ Auto" แล้ว • กำลังบันทึกข้อมูลล่าสุดขึ้นระบบ...');
+      await pushToGoogleSheet(gasUrl, sheets, activeSheetId, false);
+    } else {
+      setSyncStatus('idle');
+      showToast('ปิดโหมด "ซิงค์ Auto" แล้ว (แก้ไขข้อมูลในเครื่องได้โดยไม่ส่งขึ้นระบบ)');
+    }
+  };
+
+  const handleGateConnectSubmit = async (e) => {
+    e.preventDefault();
+    const trimmed = gateGasInput.trim();
+    if (!trimmed.startsWith('https://script.google.com/macros/s/')) {
+      setGateError('กรุณากรอก URL ที่ขึ้นต้นด้วย https://script.google.com/macros/s/... และลงท้ายด้วย /exec');
+      return;
+    }
+
+    setGateError('');
+    setIsConnectingGate(true);
+    // บังคับปิดโหมดซิงค์ Auto ทุกครั้งที่ล็อกอินด้วย URL (Fetch Only)
+    setIsAutoSyncEnabled(false);
+    const ok = await fetchFromGoogleSheet(trimmed, false);
+    setIsConnectingGate(false);
+
+    if (ok) {
+      setGasUrl(trimmed);
+      localStorage.setItem('monthly_expenses_gas_url', trimmed);
+      setIsUrlConnected(true);
+      setIsDemoPreview(false);
+    } else {
+      setGateError('เชื่อมต่อไม่สำเร็จ! ตรวจสอบว่าใน Apps Script ตั้งค่า Who has access เป็น "Anyone (ทุกคน)" และใช้ลิงก์ที่ลงท้ายด้วย /exec');
+    }
+  };
+
+  const handleDisconnectUrl = () => {
+    setIsAutoSyncEnabled(false);
+    setIsUrlConnected(false);
+    setIsDemoPreview(false);
+    setGateGasInput(gasUrl);
+  };
 
   const handleSaveCloudSettings = async (e) => {
     e.preventDefault();
-    const trimmedEmail = inputCloudEmail.trim();
-    if (trimmedEmail) {
-      setCloudEmail(trimmedEmail);
-      localStorage.setItem('monthly_expenses_cloud_email', trimmedEmail);
-      showToast(`ซิงค์ข้อมูลอัตโนมัติกับอีเมล "${trimmedEmail}" เรียบร้อยแล้ว`);
-    }
     const trimmedUrl = inputGasUrl.trim();
-    if (trimmedUrl !== gasUrl) {
-      setGasUrl(trimmedUrl);
-      if (trimmedUrl) {
-        localStorage.setItem('monthly_expenses_gas_url', trimmedUrl);
-        await fetchFromGoogleSheet(trimmedUrl, false);
-      } else {
-        localStorage.removeItem('monthly_expenses_gas_url');
-      }
+    if (!trimmedUrl.startsWith('https://script.google.com/macros/s/')) {
+      showToast('URL ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://script.google.com/macros/s/...');
+      return;
     }
-    setCloudModal(false);
+    setIsAutoSyncEnabled(false);
+    const ok = await fetchFromGoogleSheet(trimmedUrl, false);
+    if (ok) {
+      setGasUrl(trimmedUrl);
+      localStorage.setItem('monthly_expenses_gas_url', trimmedUrl);
+      setIsUrlConnected(true);
+      setIsDemoPreview(false);
+      setCloudModal(false);
+    }
   };
 
   const currentSheet = useMemo(() => {
@@ -630,34 +621,7 @@ export default function App() {
   };
 
   const totals = useMemo(() => computeSheetSummary(currentSheet), [currentSheet]);
-
-  const monthlySummaries = useMemo(() => {
-    return sheets.map((sheet) => ({
-      id: sheet.id,
-      name: sheet.name,
-      ...computeSheetSummary(sheet),
-    }));
-  }, [sheets]);
-
-  const overallStats = useMemo(() => {
-    const totalIncomeAll = monthlySummaries.reduce((acc, m) => acc + m.incomeTotal, 0);
-    const totalExpenseAll = monthlySummaries.reduce((acc, m) => acc + m.totalAllExpenses, 0);
-    const totalInvestmentAll = monthlySummaries.reduce((acc, m) => acc + m.investmentTotal, 0);
-    const totalEssentialAll = monthlySummaries.reduce((acc, m) => acc + m.essentialTotal, 0);
-    const totalExtraAll = monthlySummaries.reduce((acc, m) => acc + m.extraExpenseTotal, 0);
-    const totalNetAll = totalIncomeAll - totalExpenseAll;
-    const avgInvestRate = totalIncomeAll > 0 ? (totalInvestmentAll / totalIncomeAll) * 100 : 0;
-
-    return {
-      totalIncomeAll,
-      totalExpenseAll,
-      totalInvestmentAll,
-      totalEssentialAll,
-      totalExtraAll,
-      totalNetAll,
-      avgInvestRate,
-    };
-  }, [monthlySummaries]);
+  const monthlySummaries = useMemo(() => sheets.map((s) => ({ id: s.id, name: s.name, ...computeSheetSummary(s) })), [sheets]);
 
   const calcExpensePercentNum = (amount) => {
     const val = Number(amount) || 0;
@@ -666,27 +630,20 @@ export default function App() {
     return (val / base) * 100;
   };
 
-  const calcExpensePercent = (amount) => {
-    return `${calcExpensePercentNum(amount).toFixed(2)}%`;
-  };
+  const calcExpensePercent = (amount) => `${calcExpensePercentNum(amount).toFixed(2)}%`;
 
   const essentialLimitPct = currentSheet.essentialLimitPct !== undefined ? Number(currentSheet.essentialLimitPct) : 70;
   const investmentLimitPct = currentSheet.investmentLimitPct !== undefined ? Number(currentSheet.investmentLimitPct) : 20;
 
   const handleLimitPctChange = (field, value) => {
     const clamped = Math.max(0, Math.min(100, Number(value) || 0));
-    updateCurrentSheet((sheet) => ({
-      ...sheet,
-      [field]: clamped,
-    }));
+    updateCurrentSheet((sheet) => ({ ...sheet, [field]: clamped }));
   };
 
   const handleEssentialChange = (id, field, value) => {
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      essentialExpenses: (sheet.essentialExpenses || []).map((row) =>
-        row.id === id ? { ...row, [field]: value } : row
-      ),
+      essentialExpenses: (sheet.essentialExpenses || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     }));
   };
 
@@ -694,10 +651,7 @@ export default function App() {
     const nextNo = (currentSheet.essentialExpenses || []).length + 1;
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      essentialExpenses: [
-        ...(sheet.essentialExpenses || []),
-        { id: `e_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' },
-      ],
+      essentialExpenses: [...(sheet.essentialExpenses || []), { id: `e_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' }],
     }));
   };
 
@@ -711,9 +665,7 @@ export default function App() {
   const handleInvestmentChange = (id, field, value) => {
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      investments: (sheet.investments || []).map((row) =>
-        row.id === id ? { ...row, [field]: value } : row
-      ),
+      investments: (sheet.investments || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     }));
   };
 
@@ -721,10 +673,7 @@ export default function App() {
     const nextNo = (currentSheet.investments || []).length + 1;
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      investments: [
-        ...(sheet.investments || []),
-        { id: `i_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' },
-      ],
+      investments: [...(sheet.investments || []), { id: `i_${Date.now()}`, no: String(nextNo), item: '', detail: '', amount: 0, status: 'pending' }],
     }));
   };
 
@@ -738,9 +687,7 @@ export default function App() {
   const handleIncomeChange = (id, field, value) => {
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      incomes: (sheet.incomes || []).map((row) =>
-        row.id === id ? { ...row, [field]: value } : row
-      ),
+      incomes: (sheet.incomes || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     }));
   };
 
@@ -748,10 +695,7 @@ export default function App() {
     const nextNo = (currentSheet.incomes || []).length + 1;
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      incomes: [
-        ...(sheet.incomes || []),
-        { id: `inc_${Date.now()}`, no: String(nextNo), source: '', amount: 0 },
-      ],
+      incomes: [...(sheet.incomes || []), { id: `inc_${Date.now()}`, no: String(nextNo), source: '', amount: 0 }],
     }));
   };
 
@@ -765,9 +709,7 @@ export default function App() {
   const handleExtraExpenseChange = (id, field, value) => {
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      extraExpenses: (sheet.extraExpenses || []).map((row) =>
-        row.id === id ? { ...row, [field]: value } : row
-      ),
+      extraExpenses: (sheet.extraExpenses || []).map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     }));
   };
 
@@ -775,10 +717,7 @@ export default function App() {
     const nextNo = (currentSheet.extraExpenses || []).length + 3;
     updateCurrentSheet((sheet) => ({
       ...sheet,
-      extraExpenses: [
-        ...(sheet.extraExpenses || []),
-        { id: `ext_${Date.now()}`, no: String(nextNo), item: '', amount: 0 },
-      ],
+      extraExpenses: [...(sheet.extraExpenses || []), { id: `ext_${Date.now()}`, no: String(nextNo), item: '', amount: 0 }],
     }));
   };
 
@@ -789,7 +728,6 @@ export default function App() {
     }));
   };
 
-  // ระบบคลิกค้างที่ปุ่มขีด 3 ขีด (☰) เพื่อลากสลับตำแหน่งแถวข้อมูล
   const handleDragStartRow = (e, listKey, id) => {
     setDraggedItem({ listKey, id });
     e.dataTransfer.effectAllowed = 'move';
@@ -800,7 +738,6 @@ export default function App() {
 
   const handleDragEnterRow = (listKey, targetId, startNo = 1) => {
     if (!draggedItem || draggedItem.listKey !== listKey || draggedItem.id === targetId) return;
-    setDragOverId(targetId);
 
     updateCurrentSheet((sheet) => {
       const list = [...(sheet[listKey] || [])];
@@ -825,7 +762,6 @@ export default function App() {
 
   const handleDragEndRow = () => {
     setDraggedItem(null);
-    setDragOverId(null);
   };
 
   const handleCreateNewMonth = (e) => {
@@ -849,9 +785,7 @@ export default function App() {
     e.preventDefault();
     if (!editMonthModal || !editMonthModal.name.trim()) return;
     const updatedName = editMonthModal.name.trim();
-    setSheets((prev) =>
-      prev.map((s) => (s.id === editMonthModal.id ? { ...s, name: updatedName } : s))
-    );
+    setSheets((prev) => prev.map((s) => (s.id === editMonthModal.id ? { ...s, name: updatedName } : s)));
     setEditMonthModal(null);
     showToast(`เปลี่ยนชื่อเดือนเป็น "${updatedName}" เรียบร้อยแล้ว`);
   };
@@ -860,72 +794,47 @@ export default function App() {
     const target = sheets.find((s) => s.id === targetId);
     if (!target) return;
     if (sheets.length <= 1) {
-      const resetSheet = {
-        ...JSON.parse(JSON.stringify(DEFAULT_SHEET_DATA)),
-        id: `sheet_${Date.now()}`,
-        name: DEFAULT_SHEET_DATA.name,
-      };
+      const resetSheet = { ...JSON.parse(JSON.stringify(DEFAULT_SHEET_DATA)), id: `sheet_${Date.now()}` };
       setSheets([resetSheet]);
       setActiveSheetId(resetSheet.id);
       setDeleteMonthModal(null);
-      showToast('ลบและรีเซ็ตเป็นเดือนเริ่มต้นเรียบร้อยแล้ว');
+      showToast('รีเซ็ตเป็นเดือนเริ่มต้นเรียบร้อยแล้ว');
       return;
     }
     const remaining = sheets.filter((s) => s.id !== targetId);
     setSheets(remaining);
-    if (activeSheetId === targetId) {
-      setActiveSheetId(remaining[remaining.length - 1].id);
-    }
+    if (activeSheetId === targetId) setActiveSheetId(remaining[remaining.length - 1].id);
     setDeleteMonthModal(null);
     showToast(`ลบเดือน "${target.name}" เรียบร้อยแล้ว`);
   };
 
-  const handleResetToDefault = () => {
-    updateCurrentSheet(() => ({
-      ...JSON.parse(JSON.stringify(DEFAULT_SHEET_DATA)),
-      id: currentSheet.id,
-      name: currentSheet.name,
-    }));
-    setConfirmResetModal(false);
-    showToast('รีเซ็ตข้อมูลกลับเป็นค่าเริ่มต้นเรียบร้อยแล้ว');
-  };
-
   const handleExportCSV = () => {
     const rows = [
-      ['สรุปรายรับ-รายจ่าย:', currentSheet.name],
+      ['สรุปรายรับ-รายจ่าย:', currentSheet.name, 'URL Sync:', gasUrl || 'Local Preview'],
       [],
       ['--- 1. รายได้ ---'],
-      ['ลำดับ', 'แหล่งรายได้', 'จำนวนเงิน', 'สัดส่วน (%)'],
-      ...(currentSheet.incomes || []).map((r) => {
-        const pct = totals.incomeTotal > 0 ? ((r.amount / totals.incomeTotal) * 100).toFixed(2) + '%' : '0.00%';
-        return [r.no, r.source, r.amount, pct];
-      }),
-      ['', 'รายได้รวมทั้งหมด', totals.incomeTotal, '100.00%'],
+      ['ลำดับ', 'แหล่งรายได้', 'จำนวนเงิน'],
+      ...(currentSheet.incomes || []).map((r) => [r.no, r.source, r.amount]),
+      ['', 'รายได้รวมทั้งหมด', totals.incomeTotal],
       [],
       ['--- 2. รายจ่ายจำเป็น ---'],
       ['ลำดับ', 'รายการ', 'รายละเอียด', 'จำนวนเงิน', 'สถานะ'],
       ...(currentSheet.essentialExpenses || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
-      ['', 'รวมรายจ่ายจำเป็น (Total)', '', totals.essentialTotal],
+      ['', 'รวมรายจ่ายจำเป็น', '', totals.essentialTotal],
       [],
       ['--- 3. เงินลงทุน ---'],
       ['ลำดับ', 'รายการ', 'รายละเอียด', 'งบลงทุน', 'สถานะ'],
       ...(currentSheet.investments || []).map((r) => [r.no, r.item, r.detail, r.amount, migrateRowStatus(r) === 'paid' ? 'จ่ายแล้ว' : 'รอจ่าย']),
-      ['', 'รวมเงินลงทุน (Total)', '', totals.investmentTotal],
+      ['', 'รวมเงินลงทุน', '', totals.investmentTotal],
       [],
       ['--- 4. รวมรายจ่ายและรายจ่ายพิเศษ ---'],
-      ['ลำดับ', 'หมวดหมู่รายจ่าย', 'จำนวนเงิน', 'สัดส่วน (%)'],
-      ['1', 'ค่าใช้จ่ายจำเป็น', totals.essentialTotal, calcExpensePercent(totals.essentialTotal)],
-      ['2', 'ลงทุน , เงินเก็บ', totals.investmentTotal, calcExpensePercent(totals.investmentTotal)],
-      ...(currentSheet.extraExpenses || []).map((r) => [r.no, r.item, r.amount, calcExpensePercent(r.amount)]),
-      ['', 'รายจ่ายรวมทั้งหมด', totals.totalAllExpenses, calcExpensePercent(totals.totalAllExpenses)],
-      [],
-      ['คงเหลือ TOTAL (เงินคงเหลือทั้งหมด)', totals.netRemaining],
+      ['1', 'ค่าใช้จ่ายจำเป็น', totals.essentialTotal],
+      ['2', 'ลงทุน , เงินเก็บ', totals.investmentTotal],
+      ...(currentSheet.extraExpenses || []).map((r) => [r.no, r.item, r.amount]),
+      ['', 'รายจ่ายรวมทั้งหมด', totals.totalAllExpenses],
+      ['', 'คงเหลือสุทธิ (TOTAL)', totals.netRemaining],
     ];
-
-    const csvContent =
-      '\uFEFF' +
-      rows.map((e) => e.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-
+    const csvContent = '\uFEFF' + rows.map((e) => e.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -934,7 +843,6 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast('ส่งออกไฟล์ CSV เรียบร้อยแล้ว');
   };
 
   const filteredEssential = useMemo(() => {
@@ -973,113 +881,158 @@ export default function App() {
     });
   }, [currentSheet.extraExpenses, hideZeroRows, searchQuery]);
 
-  const essentialBarPct = Math.min(100, calcExpensePercentNum(totals.essentialTotal));
-  const investmentBarPct = Math.min(100 - essentialBarPct, calcExpensePercentNum(totals.investmentTotal));
-  const extraBarPct = Math.min(100 - essentialBarPct - investmentBarPct, calcExpensePercentNum(totals.extraExpenseTotal));
-
-  if (!isLoggedIn) {
+  if (!isUrlConnected && !isDemoPreview) {
     return (
       <div className="min-h-screen bg-[#080C14] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
         <div className="pointer-events-none fixed top-1/4 left-1/4 w-[480px] h-[320px] bg-blue-600/15 blur-[130px] rounded-full" />
         <div className="pointer-events-none fixed bottom-1/4 right-1/4 w-[420px] h-[300px] bg-emerald-600/10 blur-[140px] rounded-full" />
 
-        <div className="w-full max-w-md bg-[#111827]/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 space-y-6">
+        {toastMsg && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#111827]/95 backdrop-blur-md text-slate-100 px-4 py-3 rounded-xl shadow-2xl border border-blue-500/40">
+            <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+            <span className="text-sm font-medium">{toastMsg}</span>
+          </div>
+        )}
+
+        <div className="w-full max-w-lg bg-[#111827]/95 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 space-y-6">
           <div className="flex flex-col items-center text-center space-y-3">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white shadow-xl shadow-blue-600/30 border border-blue-400/30">
-              <Sparkles className="w-7 h-7" />
+              <Cloud className="w-7 h-7" />
             </div>
             <div>
-              <span className="text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 px-3 py-0.5 rounded-full">
-                Cloud Auto-Sync • Financial SaaS
+              <span className="text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-3 py-0.5 rounded-full">
+                Fetch Only on Login • Safe Cloud Sync
               </span>
               <h1 className="text-2xl font-extrabold text-white mt-2 tracking-tight">
-                เข้าสู่ระบบจัดการงบรายเดือน
+                เชื่อมต่อ URL Google Apps Script
               </h1>
-              <p className="text-xs text-slate-400 mt-1">
-                กรอกอีเมลของคุณเพื่อซิงค์ข้อมูลรายรับ-รายจ่ายอัตโนมัติ เปิดในคอมหรือมือถือเครื่องไหนข้อมูลก็อัปเดตตรงกันทันที
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                เมื่อใส่ URL ล็อกอิน ระบบจะ <span className="text-emerald-400 font-semibold">ดึงข้อมูลล่าสุดมาแสดงผลอย่างเดียว (Fetch Only)</span> โดยไม่เขียนทับข้อมูลเดิม เมื่อต้องการบันทึกค่อยกดปุ่ม <span className="text-blue-400 font-semibold">"ซิงค์ Auto"</span> ด้านบนของจอ
               </p>
             </div>
           </div>
 
-          <form onSubmit={handleLoginSubmit} className="space-y-4">
+          <form onSubmit={handleGateConnectSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="block text-xs font-semibold text-slate-300">
-                อีเมลสำหรับซิงค์ข้อมูลของคุณ (Email Address)
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-slate-300">
+                  Google Apps Script Web App URL (บังคับกรอกเพื่อซิงค์ 100%)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowCodeModal(true)}
+                  className="text-[11px] font-semibold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer"
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>ดูโค้ด Code.gs</span>
+                </button>
+              </div>
               <div className="relative">
-                <Mail className="w-5 h-5 text-blue-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <Key className="w-5 h-5 text-blue-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
-                  type="email"
+                  type="url"
                   required
-                  placeholder="yourname@gmail.com"
-                  value={loginEmailInput}
-                  onChange={(e) => setLoginEmailInput(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 bg-[#090D16] border border-slate-700 rounded-xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 font-mono"
+                  placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+                  value={gateGasInput}
+                  onChange={(e) => setGateGasInput(e.target.value)}
+                  className="w-full pl-11 pr-4 py-3 bg-[#090D16] border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 font-mono"
                 />
               </div>
             </div>
 
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowAdvancedGas(!showAdvancedGas)}
-                className="text-[11px] text-slate-400 hover:text-blue-400 transition cursor-pointer flex items-center gap-1"
-              >
-                <span>{showAdvancedGas ? '▼ ซ่อนตั้งค่า Google Sheets เสริม' : '▶ ตั้งค่าเชื่อม Google Sheets Web App URL (เสริม - ไม่บังคับ)'}</span>
-              </button>
-
-              {showAdvancedGas && (
-                <div className="mt-2 p-3 bg-[#090D16]/80 rounded-xl border border-slate-800 space-y-1.5">
-                  <label className="block text-[11px] text-slate-400">Google Apps Script URL (ลงท้ายด้วย /exec)</label>
-                  <input
-                    type="url"
-                    placeholder="https://script.google.com/macros/s/.../exec"
-                    value={loginGasInput}
-                    onChange={(e) => setLoginGasInput(e.target.value)}
-                    className="w-full px-3 py-2 bg-[#111827] border border-slate-700 rounded-lg text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              )}
-            </div>
+            {gateError && (
+              <div className="p-3.5 rounded-xl bg-rose-950/50 border border-rose-500/50 text-xs text-rose-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{gateError}</span>
+              </div>
+            )}
 
             <button
               type="submit"
-              className="w-full py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-600/30 border border-blue-400/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+              disabled={isConnectingGate}
+              className="w-full py-3 px-4 rounded-xl text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-60 text-white shadow-lg shadow-blue-600/30 border border-blue-400/30 transition-all cursor-pointer flex items-center justify-center gap-2"
             >
-              <Cloud className="w-4 h-4" />
-              <span>เข้าสู่ระบบ & ซิงค์ข้อมูลเข้าอีเมล</span>
+              <Cloud className={`w-4 h-4 ${isConnectingGate ? 'animate-bounce' : ''}`} />
+              <span>
+                {isConnectingGate ? 'กำลังดึงและซิงค์ข้อมูล 100%...' : 'เชื่อมต่อ URL & ดึงข้อมูลทั้งหมดทันที'}
+              </span>
             </button>
           </form>
 
-          <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-1.5">
-            <div className="flex items-center gap-2 text-emerald-400 font-medium">
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-              <span>ไม่ต้องตั้งรหัสผ่าน ข้อมูลผูกกับอีเมลของคุณโดยอัตโนมัติ</span>
+          <div className="pt-4 border-t border-slate-800/80 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCodeModal(true)}
+                className="flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold bg-[#090D16] hover:bg-slate-800 text-blue-300 border border-blue-500/30 flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <Code2 className="w-4 h-4" />
+                <span>คัดลอกโค้ด Code.gs ไปใส่ Apps Script</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDemoPreview(true);
+                  showToast('เข้าสู่โหมดพรีวิว (สามารถกดปุ่ม "คลิกใส่ URL Apps Script" ด้านบนเพื่อซิงค์จริงได้ตลอดเวลา)');
+                }}
+                className="py-2.5 px-3 rounded-xl text-xs font-medium bg-[#090D16] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>ดูหน้าเว็บพรีวิว (Demo)</span>
+              </button>
             </div>
-            <p className="text-slate-500 leading-relaxed">
-              เวลาเปลี่ยนคอมพิวเตอร์หรือเปิดในมือถือ เพียงกรอกอีเมลเดิมนี้ ระบบจะดึงข้อมูลล่าสุดของคุณขึ้นมาแสดงทันที
+            <p className="text-[11px] text-slate-500 leading-relaxed text-center">
+              เวลาเปลี่ยนคอมพิวเตอร์หรือเปิดในมือถือ เพียงนำ URL เดิมนี้มาวาง ข้อมูลทั้ง 4 หัวข้อและทุกเดือนย้อนหลังจะถูกดึงมาแสดงตรงกัน 100%
             </p>
           </div>
         </div>
+
+        {showCodeModal && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-[#111827] border border-slate-700 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-white">โค้ดสำหรับ Google Apps Script (Code.gs)</h3>
+                  <p className="text-xs text-slate-400">คัดลอกไปวางใน Google Sheets &gt; Extensions &gt; Apps Script แล้วกด Deploy เป็น Web App (Anyone)</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={copyCodeGsToClipboard}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>คัดลอก Code.gs</span>
+                </button>
+              </div>
+              <pre className="bg-[#090D16] border border-slate-800 rounded-xl p-4 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-80">
+                {GAS_CODE_TEMPLATE}
+              </pre>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowCodeModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-[#080C14] text-slate-100 pb-20 selection:bg-blue-600 selection:text-white relative overflow-x-hidden">
-      <div className="pointer-events-none fixed top-0 left-1/4 w-[500px] h-[300px] bg-blue-600/15 blur-[130px] rounded-full" />
-      <div className="pointer-events-none fixed bottom-0 right-1/4 w-[450px] h-[300px] bg-indigo-600/10 blur-[140px] rounded-full" />
-
       {toastMsg && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-[#111827]/95 backdrop-blur-md text-slate-100 px-4 py-3 rounded-xl shadow-2xl border border-blue-500/40">
-          <div className="w-6 h-6 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center">
-            <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
-          </div>
+          <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
           <span className="text-sm font-medium">{toastMsg}</span>
         </div>
       )}
 
-      {/* Header */}
+      {/* Top Navbar */}
       <header className="sticky top-0 z-30 bg-[#080C14]/90 backdrop-blur-xl border-b border-slate-800/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
@@ -1090,11 +1043,11 @@ export default function App() {
               <div className="flex items-center gap-2.5">
                 <h1 className="text-lg font-bold tracking-tight text-white">Monthly expenses</h1>
                 <span className="text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 px-2.5 py-0.5 rounded-full">
-                  Financial SaaS
+                  Dark SaaS UI
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                ระบบบริหารรายรับ-รายจ่ายและพอร์ตการลงทุนรายเดือน • บันทึกข้อมูลอัตโนมัติ
+                ระบบบริหารรายรับ-รายจ่ายและพอร์ตการลงทุนรายเดือน • ซิงค์ลง Google Apps Script 100%
               </p>
             </div>
           </div>
@@ -1103,32 +1056,26 @@ export default function App() {
             <button
               type="button"
               onClick={() => setActivePage('workspace')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                activePage === 'workspace'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                  : 'text-slate-400 hover:text-white'
+              className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                activePage === 'workspace' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <LayoutGrid className="w-4 h-4" />
-              <span>ตารางจัดการงบ</span>
+              ตารางจัดการงบ (4 หัวข้อ)
             </button>
             <button
               type="button"
               onClick={() => setActivePage('analytics')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold flex items-center gap-2 transition-all cursor-pointer ${
-                activePage === 'analytics'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                  : 'text-slate-400 hover:text-white'
+              className={`px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all cursor-pointer ${
+                activePage === 'analytics' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
-              <BarChart3 className="w-4 h-4" />
-              <span>สรุปรายเดือน & กราฟ</span>
+              สรุปรายเดือน & กราฟ
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center bg-[#111827] rounded-xl px-2.5 py-1 border border-slate-800 hover:border-slate-700 transition gap-1">
-              <Calendar className="w-4 h-4 text-blue-400 mr-1 shrink-0" />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center bg-[#111827] rounded-xl px-2.5 py-1 border border-slate-800 gap-1">
+              <Calendar className="w-4 h-4 text-blue-400 mr-1" />
               <select
                 value={currentSheet.id}
                 onChange={(e) => setActiveSheetId(e.target.value)}
@@ -1144,7 +1091,7 @@ export default function App() {
                 type="button"
                 onClick={() => setEditMonthModal({ id: currentSheet.id, name: currentSheet.name })}
                 title="แก้ไขชื่อเดือนนี้"
-                className="p-1 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-slate-800 transition cursor-pointer"
+                className="p-1 rounded-lg text-slate-400 hover:text-blue-400 cursor-pointer"
               >
                 <Edit3 className="w-3.5 h-3.5" />
               </button>
@@ -1152,7 +1099,7 @@ export default function App() {
                 type="button"
                 onClick={() => setDeleteMonthModal({ id: currentSheet.id, name: currentSheet.name })}
                 title="ลบเดือนนี้"
-                className="p-1 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
+                className="p-1 rounded-lg text-slate-400 hover:text-rose-400 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -1160,261 +1107,176 @@ export default function App() {
 
             <button
               onClick={() => setNewMonthModal(true)}
-              className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/25 border border-blue-400/30 flex items-center gap-1.5 transition-all cursor-pointer"
+              className="px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer"
             >
-              <FolderPlus className="w-4 h-4" />
-              <span>+ เดือนใหม่</span>
+              <Plus className="w-4 h-4" />
+              <span>เดือนใหม่</span>
             </button>
 
+            {/* ปุ่มเปิด/ปิดโหมด "ซิงค์ Auto" */}
             <button
-              onClick={() => {
-                setInputCloudEmail(cloudEmail);
-                setInputGasUrl(gasUrl);
-                setCloudModal(true);
-              }}
-              title="ล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ (เปิดเครื่องไหนก็ข้อมูลตรงกัน)"
-              className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border flex items-center gap-1.5 transition cursor-pointer ${
+              type="button"
+              onClick={handleToggleAutoSync}
+              title={
+                isAutoSyncEnabled
+                  ? 'คลิกเพื่อปิดโหมดซิงค์ Auto'
+                  : 'คลิกเพื่อเปิดโหมดซิงค์ Auto (บันทึกข้อมูลล่าสุดและซิงค์ต่อเนื่อง)'
+              }
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold border flex items-center gap-2 transition-all cursor-pointer ${
                 syncStatus === 'error'
                   ? 'bg-rose-950/60 border-rose-500/60 text-rose-300'
-                  : 'bg-emerald-950/50 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                  : isAutoSyncEnabled
+                  ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.25)]'
+                  : 'bg-[#111827] hover:bg-slate-800 border-slate-700 text-slate-300'
               }`}
             >
+              <span
+                className={`w-2.5 h-2.5 rounded-full transition-all ${
+                  syncStatus === 'saving' || syncStatus === 'loading'
+                    ? 'bg-amber-400 animate-ping'
+                    : isAutoSyncEnabled
+                    ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]'
+                    : 'bg-slate-500'
+                }`}
+              />
               <Cloud
                 className={`w-4 h-4 ${
-                  syncStatus === 'saving' || syncStatus === 'loading'
-                    ? 'text-amber-400 animate-pulse'
-                    : syncStatus === 'error'
-                    ? 'text-rose-400'
-                    : 'text-emerald-400'
+                  isAutoSyncEnabled ? 'text-emerald-400' : 'text-slate-400'
                 }`}
               />
               <span>
                 {syncStatus === 'loading'
-                  ? 'กำลังซิงค์...'
-                  : syncStatus === 'saving'
-                  ? 'กำลังบันทึก Cloud...'
-                  : syncStatus === 'error'
-                  ? 'ซิงค์ผิดพลาด'
-                  : `Cloud: ${cloudEmail}`}
+                  ? 'กำลังดึงข้อมูล...'
+                  : isAutoSyncEnabled
+                  ? syncStatus === 'saving'
+                    ? 'ซิงค์ Auto: กำลังบันทึก...'
+                    : 'ซิงค์ Auto: เปิด'
+                  : 'ซิงค์ Auto: ปิด'}
               </span>
             </button>
 
+            {isUrlConnected && (
+              <button
+                onClick={() => fetchFromGoogleSheet(gasUrl, false)}
+                title="ดึงข้อมูลล่าสุดจาก Google Apps Script ทันที (Fetch Only)"
+                className="p-2 rounded-xl bg-[#111827] hover:bg-slate-800 text-emerald-400 border border-slate-800 transition cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${syncStatus === 'loading' ? 'animate-spin' : ''}`} />
+              </button>
+            )}
+
             <button
-              onClick={handleLogout}
-              title="สลับบัญชีอีเมล / ออกจากระบบ"
+              onClick={() => {
+                setInputGasUrl(gasUrl);
+                setCloudModal(true);
+              }}
+              title="ตั้งค่า URL Google Apps Script"
+              className="px-2.5 py-2 rounded-xl text-xs font-medium bg-[#111827] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1 transition cursor-pointer"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden md:inline">ตั้งค่า URL</span>
+            </button>
+
+            <button
+              onClick={() => setShowCodeModal(true)}
+              title="ดูและคัดลอกโค้ด Code.gs สำหรับ Google Apps Script"
+              className="px-2.5 py-2 rounded-xl text-xs font-medium bg-[#111827] hover:bg-slate-800 text-blue-400 border border-slate-800 flex items-center gap-1 transition cursor-pointer"
+            >
+              <Code2 className="w-4 h-4" />
+              <span className="hidden md:inline">Code.gs</span>
+            </button>
+
+            <button
+              onClick={handleDisconnectUrl}
+              title="เปลี่ยน URL Google Apps Script"
               className="px-2.5 py-2 rounded-xl text-xs font-medium bg-[#111827] hover:bg-slate-800 text-slate-300 border border-slate-800 flex items-center gap-1 transition cursor-pointer"
             >
               <LogOut className="w-4 h-4 text-rose-400" />
-              <span className="hidden md:inline">สลับอีเมล</span>
+              <span className="hidden md:inline">เปลี่ยน URL</span>
             </button>
 
             <button
               onClick={handleExportCSV}
-              className="px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-[#111827] hover:bg-slate-800 text-slate-200 border border-slate-800 flex items-center gap-1.5 transition cursor-pointer"
+              className="px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-[#111827] hover:bg-slate-800 text-slate-200 border border-slate-800 flex items-center gap-1.5 cursor-pointer"
             >
               <Download className="w-4 h-4 text-blue-400" />
-              <span className="hidden sm:inline">Export CSV</span>
-            </button>
-
-            <button
-              onClick={() => setConfirmResetModal(true)}
-              title="รีเซ็ตข้อมูลเดือนนี้กลับเป็นค่าเริ่มต้น"
-              className="p-2 rounded-xl bg-[#111827] hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 border border-slate-800 transition cursor-pointer"
-            >
-              <RotateCcw className="w-4 h-4" />
+              <span className="hidden sm:inline">CSV</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6 relative z-10">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 space-y-6">
         {activePage === 'workspace' ? (
           <>
-            {/* KPI Summary Cards */}
+            {/* Summary KPI Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* รวมรายได้ของเดือนนี้ - สีเขียว */}
-              <div className="bg-gradient-to-br from-emerald-950/40 via-[#111827]/95 to-[#111827]/95 backdrop-blur-sm p-5 rounded-2xl border border-emerald-500/35 hover:border-emerald-400/60 transition-all shadow-lg shadow-emerald-500/5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-emerald-400">
-                    รวมรายได้ของเดือนนี้ ({currentSheet.name})
-                  </span>
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                    <Wallet className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="text-2xl font-bold text-emerald-400 font-mono tracking-tight">
-                  ฿{formatCurrency(totals.incomeTotal)}
-                </div>
-                <div className="mt-2.5 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">
-                    แหล่งรายได้ {(currentSheet.incomes || []).filter((i) => i.amount > 0).length} รายการ
-                  </span>
-                  <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono text-[11px]">
-                    <ArrowUpRight className="w-3.5 h-3.5" /> 100%
-                  </span>
-                </div>
+              <div className="bg-gradient-to-br from-emerald-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-emerald-500/35">
+                <div className="text-xs font-semibold text-emerald-400 mb-2">รวมรายได้ของเดือนนี้ ({currentSheet.name})</div>
+                <div className="text-2xl font-bold text-emerald-400 font-mono">฿{formatCurrency(totals.incomeTotal)}</div>
+                <div className="mt-2 text-xs text-slate-400">แหล่งรายได้ {(currentSheet.incomes || []).filter(i => i.amount > 0).length} รายการ</div>
               </div>
 
-              {/* รวมรายจ่ายของเดือนนี้ - สีแดง */}
-              <div className="bg-gradient-to-br from-rose-950/40 via-[#111827]/95 to-[#111827]/95 backdrop-blur-sm p-5 rounded-2xl border border-rose-500/35 hover:border-rose-400/60 transition-all shadow-lg shadow-rose-500/5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-rose-400">
-                    รวมรายจ่ายของเดือนนี้
-                  </span>
-                  <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
-                    <CreditCard className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="text-2xl font-bold text-rose-400 font-mono tracking-tight">
-                  ฿{formatCurrency(totals.totalAllExpenses)}
-                </div>
-                <div className="mt-2.5 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">
-                    จ่ายแล้ว ฿{formatCurrency(totals.essentialPaidTotal + totals.investmentPaidTotal)}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 font-mono text-[11px]">
-                    {totals.incomeTotal > 0
-                      ? `${((totals.totalAllExpenses / totals.incomeTotal) * 100).toFixed(1)}% ของรายได้`
-                      : '0.0%'}
-                  </span>
-                </div>
+              <div className="bg-gradient-to-br from-rose-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-rose-500/35">
+                <div className="text-xs font-semibold text-rose-400 mb-2">รวมรายจ่ายของเดือนนี้</div>
+                <div className="text-2xl font-bold text-rose-400 font-mono">฿{formatCurrency(totals.totalAllExpenses)}</div>
+                <div className="mt-2 text-xs text-slate-400">จ่ายแล้ว ฿{formatCurrency(totals.essentialPaidTotal + totals.investmentPaidTotal)}</div>
               </div>
 
-              {/* เงินลงทุน - สีน้ำเงิน */}
-              <div className="bg-gradient-to-br from-blue-950/40 via-[#111827]/95 to-[#111827]/95 backdrop-blur-sm p-5 rounded-2xl border border-blue-500/35 hover:border-blue-400/60 transition-all shadow-lg shadow-blue-500/5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-blue-400">เงินลงทุน</span>
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                </div>
-                <div className="text-2xl font-bold text-blue-400 font-mono tracking-tight">
-                  ฿{formatCurrency(totals.investmentTotal)}
-                </div>
-                <div className="mt-2.5 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">
-                    จ่ายแล้ว {totals.investmentPaidCount}/{(currentSheet.investments || []).length} รายการ
-                  </span>
-                  <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono text-[11px]">
-                    {calcExpensePercent(totals.investmentTotal)}
-                  </span>
-                </div>
+              <div className="bg-gradient-to-br from-blue-950/40 via-[#111827] to-[#111827] p-5 rounded-2xl border border-blue-500/35">
+                <div className="text-xs font-semibold text-blue-400 mb-2">เงินลงทุน</div>
+                <div className="text-2xl font-bold text-blue-400 font-mono">฿{formatCurrency(totals.investmentTotal)}</div>
+                <div className="mt-2 text-xs text-slate-400">สัดส่วน {calcExpensePercent(totals.investmentTotal)}</div>
               </div>
 
-              {/* TOTAL เงินคงเหลือทั้งหมด */}
-              <div
-                className={`p-5 rounded-2xl border transition-all shadow-lg relative overflow-hidden ${
-                  totals.netRemaining >= 0
-                    ? 'bg-gradient-to-br from-blue-950/60 via-[#111827] to-[#111827] border-blue-500/50 shadow-blue-500/10'
-                    : 'bg-gradient-to-br from-rose-950/50 via-[#111827] to-[#111827] border-rose-500/50 shadow-rose-500/10'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-slate-200">
-                    TOTAL เงินคงเหลือทั้งหมด
-                  </span>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                      totals.netRemaining >= 0
-                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                        : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                    }`}
-                  >
-                    {totals.netRemaining >= 0 ? 'งบสมดุล' : 'เกินงบประมาณ'}
-                  </span>
-                </div>
-                <div
-                  className={`text-2xl font-extrabold font-mono tracking-tight ${
-                    totals.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'
-                  }`}
-                >
+              <div className={`p-5 rounded-2xl border ${totals.netRemaining >= 0 ? 'bg-gradient-to-br from-blue-950/60 via-[#111827] to-[#111827] border-blue-500/50' : 'bg-gradient-to-br from-rose-950/50 via-[#111827] to-[#111827] border-rose-500/50'}`}>
+                <div className="text-xs font-semibold text-slate-200 mb-2">TOTAL เงินคงเหลือทั้งหมด</div>
+                <div className={`text-2xl font-extrabold font-mono ${totals.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
                   {totals.netRemaining > 0 ? '+' : ''}฿{formatCurrency(totals.netRemaining)}
                 </div>
-                <div className="mt-2.5 flex items-center justify-between text-xs text-slate-400">
-                  <span>รายได้รวม − รายจ่ายรวม</span>
-                  <span className="font-mono text-slate-300">
-                    {totals.netRemaining >= 0 ? 'มีเงินเหลือสุทธิ' : 'ติดลบ'}
-                  </span>
-                </div>
+                <div className="mt-2 text-xs text-slate-400">รายได้รวม − รายจ่ายรวม</div>
               </div>
             </div>
 
-            {/* Progress Bar & Quick Filter */}
-            <div className="bg-[#111827]/90 border border-slate-800/90 rounded-2xl p-4 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-              <div className="flex-1 space-y-2">
-                <div className="flex flex-wrap items-center justify-between text-xs gap-2">
-                  <span className="font-medium text-slate-300 flex items-center gap-1.5">
-                    <PieChart className="w-3.5 h-3.5 text-blue-400" />
-                    โครงสร้างการจัดสรรเงินเทียบกับรายได้รวม
-                  </span>
-                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                      รายจ่ายจำเป็น ({calcExpensePercent(totals.essentialTotal)})
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-400" />
-                      เงินลงทุน ({calcExpensePercent(totals.investmentTotal)})
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-400" />
-                      รายจ่ายเสริม ({calcExpensePercent(totals.extraExpenseTotal)})
-                    </span>
-                  </div>
-                </div>
-                <div className="w-full h-2.5 bg-[#090D16] rounded-full overflow-hidden flex border border-slate-800">
-                  <div style={{ width: `${essentialBarPct}%` }} className="bg-blue-600 h-full transition-all duration-300" />
-                  <div style={{ width: `${investmentBarPct}%` }} className="bg-cyan-400 h-full transition-all duration-300" />
-                  <div style={{ width: `${extraBarPct}%` }} className="bg-indigo-400 h-full transition-all duration-300" />
-                </div>
+            {/* Search & Filter */}
+            <div className="bg-[#111827]/90 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="text-xs text-slate-300 font-medium">
+                ตารางจัดการงบประมาณทั้ง 4 หัวข้อ (หลอดพลังแสดงในข้อ 2 และ 3 เทียบกับรายได้รวมข้อ 1)
               </div>
-
-              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                <div className="relative flex-1 sm:flex-initial">
+              <div className="flex items-center gap-2.5">
+                <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="ค้นหารายการ..."
-                    className="w-full sm:w-44 pl-8 pr-3 py-1.5 bg-[#090D16] border border-slate-800 rounded-xl text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                    className="pl-8 pr-3 py-1.5 bg-[#090D16] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => setHideZeroRows(!hideZeroRows)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition cursor-pointer ${
-                    hideZeroRows
-                      ? 'bg-blue-600/20 border-blue-500/50 text-blue-300'
-                      : 'bg-[#090D16] border-slate-800 text-slate-400 hover:text-slate-200'
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium border cursor-pointer ${
+                    hideZeroRows ? 'bg-blue-600/20 border-blue-500/50 text-blue-300' : 'bg-[#090D16] border-slate-800 text-slate-400'
                   }`}
                 >
-                  <Filter className="w-3.5 h-3.5" />
-                  <span>{hideZeroRows ? 'แสดงเฉพาะยอด > 0' : 'ซ่อนรายการที่เป็น 0.00'}</span>
+                  {hideZeroRows ? 'แสดงเฉพาะยอด > 0' : 'ซ่อนรายการที่เป็น 0.00'}
                 </button>
               </div>
             </div>
 
-            {/* 2x2 Grid Tables */}
+            {/* 4 Main Tables (2x2 Grid) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              {/* 1. รายได้ (ไม่มีหลอดพลัง) */}
-              <section className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-                <div className="p-5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-emerald-950/30 via-transparent to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                      <Wallet className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h2 className="text-base font-bold text-white">1. รายได้</h2>
-                      <p className="text-xs text-slate-400">แหล่งรายรับทั้งหมดของเดือนนี้และสัดส่วนเปอร์เซ็นต์ต่อรายได้รวม</p>
-                    </div>
+              {/* 1. รายได้ */}
+              <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-emerald-950/30 via-transparent to-transparent">
+                  <div>
+                    <h2 className="text-base font-bold text-white">1. รายได้</h2>
+                    <p className="text-xs text-slate-400">กรอกข้อมูลแหล่งรายรับของเดือนนี้ (กดค้างที่ ☰ เพื่อลากสลับตำแหน่งได้)</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={addIncomeRow}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 flex items-center gap-1 transition cursor-pointer shrink-0"
-                  >
+                  <button type="button" onClick={addIncomeRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 cursor-pointer">
                     <Plus className="w-3.5 h-3.5" /> เพิ่มแหล่งรายได้
                   </button>
                 </div>
@@ -1422,7 +1284,7 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
+                      <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
                         <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">แหล่งรายได้</th>
                         <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
@@ -1440,11 +1302,7 @@ export default function App() {
                             onDragOver={(e) => e.preventDefault()}
                             onDragEnter={() => handleDragEnterRow('incomes', row.id, 1)}
                             onDragEnd={handleDragEndRow}
-                            className={`transition-colors ${
-                              isDragging
-                                ? 'bg-emerald-500/20 opacity-60 ring-1 ring-emerald-500/50'
-                                : 'hover:bg-slate-800/30'
-                            }`}
+                            className={isDragging ? 'bg-emerald-500/20 opacity-60' : 'hover:bg-slate-800/30'}
                           >
                             <td className="py-2 px-1.5 text-center">
                               <div className="flex items-center justify-center gap-1">
@@ -1453,46 +1311,22 @@ export default function App() {
                                   onDragStart={(e) => handleDragStartRow(e, 'incomes', row.id)}
                                   onDragEnd={handleDragEndRow}
                                   title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
-                                  className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                  className="p-1 rounded-md text-slate-500 hover:text-emerald-400 hover:bg-slate-800 cursor-grab active:cursor-grabbing transition select-none"
                                 >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-                                    <line x1="4" y1="7" x2="20" y2="7" />
-                                    <line x1="4" y1="12" x2="20" y2="12" />
-                                    <line x1="4" y1="17" x2="20" y2="17" />
-                                  </svg>
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-                                <input
-                                  type="text"
-                                  value={row.no}
-                                  onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)}
-                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                                />
+                                <input type="text" value={row.no} onChange={(e) => handleIncomeChange(row.id, 'no', e.target.value)} className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
                               </div>
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.source}
-                                placeholder="ชื่อแหล่งรายได้..."
-                                onChange={(e) => handleIncomeChange(row.id, 'source', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                              />
+                              <input type="text" value={row.source} placeholder="ชื่อแหล่งรายได้..." onChange={(e) => handleIncomeChange(row.id, 'source', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
                             </td>
-                            <td className="py-2 px-2 text-right font-mono text-xs text-blue-400 font-medium">
-                              {pctNum.toFixed(2)}%
-                            </td>
+                            <td className="py-2 px-2 text-right font-mono text-xs text-blue-400">{pctNum.toFixed(2)}%</td>
                             <td className="py-2 px-1.5">
-                              <EditableNumberCell
-                                value={row.amount}
-                                onChange={(val) => handleIncomeChange(row.id, 'amount', val)}
-                              />
+                              <EditableNumberCell value={row.amount} onChange={(val) => handleIncomeChange(row.id, 'amount', val)} />
                             </td>
                             <td className="py-2 px-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => deleteIncomeRow(row.id)}
-                                className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-                              >
+                              <button type="button" onClick={() => deleteIncomeRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </td>
@@ -1503,44 +1337,29 @@ export default function App() {
                   </table>
                 </div>
 
-                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800/90 flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">รวมรายได้ทั้งหมด</span>
+                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-400">รวมรายได้ทั้งหมด</span>
                   <div className="text-lg font-bold font-mono text-emerald-400">฿{formatCurrency(totals.incomeTotal)}</div>
                 </div>
               </section>
 
               {/* 2. รายจ่ายจำเป็น */}
-              <section className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-                <div className="p-5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-blue-950/30 via-transparent to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                      <Layers className="w-4 h-4" />
+              <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-blue-950/30 via-transparent to-transparent">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-bold text-white">2. รายจ่ายจำเป็น</h2>
+                      <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.essentialPendingCount}</span>
+                      <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.essentialPaidCount}</span>
                     </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-base font-bold text-white">2. รายจ่ายจำเป็น</h2>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                          <Clock className="w-3 h-3 text-amber-400" />
-                          รอจ่าย {totals.essentialPendingCount}
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">
-                          <CheckCircle2 className="w-3 h-3 text-rose-400" />
-                          จ่ายแล้ว {totals.essentialPaidCount}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400">ค่าใช้จ่ายประจำเดือน ค่าบ้าน ค่ารถ และบิลบัตรต่างๆ</p>
-                    </div>
+                    <p className="text-xs text-slate-400">ค่าใช้จ่ายประจำเดือน ค่าบ้าน ค่ารถ และบิลบัตรต่างๆ</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={addEssentialRow}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 flex items-center gap-1 transition cursor-pointer shrink-0"
-                  >
+                  <button type="button" onClick={addEssentialRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
                     <Plus className="w-3.5 h-3.5" /> เพิ่มรายการ
                   </button>
                 </div>
 
-                {/* หลอดพลังควบคุมงบ 2. รายจ่ายจำเป็น (เทียบ 100% = รายได้ทั้งหมด ข้อ 1) */}
+                {/* หลอดพลัง ข้อ 2. รายจ่ายจำเป็น */}
                 {(() => {
                   const incomeFull = totals.incomeTotal;
                   const usedAmt = totals.essentialTotal;
@@ -1563,19 +1382,18 @@ export default function App() {
                                 : 'bg-blue-500/20 text-blue-300 border-blue-500/40'
                             }`}
                           >
-                            ตั้งเป้าไม่เกิน {essentialLimitPct}% (฿{formatCurrency(limitAmt)})
+                            เพดาน {essentialLimitPct}% (฿{formatCurrency(limitAmt)})
                           </span>
                         </div>
                         <div className="font-mono text-xs">
-                          <span className="text-slate-400">ใช้ไปรวม: </span>
+                          <span className="text-slate-400">รายจ่ายรวม: </span>
                           <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-white font-bold'}>
                             ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
                           </span>
-                          <span className="text-slate-500"> / เต็มหลอด (รายได้ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
+                          <span className="text-slate-500"> / เต็มหลอด (ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
                         </div>
                       </div>
 
-                      {/* หลอดพลัง + เส้นตั้งเพดานพร้อมป้ายบอกตำแหน่ง */}
                       <div className="relative pt-4 pb-1">
                         <div
                           style={{ left: `${Math.min(96, Math.max(4, essentialLimitPct))}%` }}
@@ -1593,7 +1411,7 @@ export default function App() {
                         <div className="relative h-4 bg-[#060911] rounded-full overflow-hidden border border-slate-800 shadow-inner">
                           <div
                             style={{ width: `${Math.min(100, essentialLimitPct)}%` }}
-                            className="absolute inset-y-0 left-0 bg-slate-800/40 pointer-events-none"
+                            className="absolute inset-y-0 left-0 bg-slate-800/35 pointer-events-none"
                           />
                           <div
                             style={{ width: `${Math.min(100, usedPctOfIncome)}%` }}
@@ -1611,7 +1429,6 @@ export default function App() {
                         />
                       </div>
 
-                      {/* แถบเลื่อนปรับ % ซ้าย-ขวา */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
                         <div className="flex items-center gap-2.5 flex-1">
                           <span className="text-[11px] text-slate-400 shrink-0">เลื่อนปรับเพดาน (%):</span>
@@ -1622,7 +1439,7 @@ export default function App() {
                             step="1"
                             value={essentialLimitPct}
                             onChange={(e) => handleLimitPctChange('essentialLimitPct', e.target.value)}
-                            className="w-full max-w-[220px] accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                            className="w-full max-w-[200px] accent-blue-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                           />
                           <span className="text-xs font-mono font-bold text-amber-300 w-10">{essentialLimitPct}%</span>
                         </div>
@@ -1645,12 +1462,12 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
+                      <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
                         <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">รายการ</th>
                         <th className="py-2.5 px-2">รายละเอียด</th>
                         <th className="py-2.5 px-2 w-28 text-right">จำนวนเงิน (฿)</th>
-                        <th className="py-2.5 px-2 w-48 text-center">สถานะ (เปิด/ปิดได้)</th>
+                        <th className="py-2.5 px-2 w-44 text-center">สถานะ</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-sm">
@@ -1665,15 +1482,15 @@ export default function App() {
                             onDragOver={(e) => e.preventDefault()}
                             onDragEnter={() => handleDragEnterRow('essentialExpenses', row.id, 1)}
                             onDragEnd={handleDragEndRow}
-                            className={`transition-colors ${
+                            className={
                               isDragging
-                                ? 'bg-blue-500/20 opacity-60 ring-1 ring-blue-500/50'
+                                ? 'bg-blue-500/20 opacity-60'
                                 : isPaid
-                                ? 'bg-rose-950/20 hover:bg-rose-950/30'
+                                ? 'bg-rose-950/20'
                                 : isPending
-                                ? 'bg-amber-950/15 hover:bg-amber-950/25'
+                                ? 'bg-amber-950/15'
                                 : 'hover:bg-slate-800/30'
-                            }`}
+                            }
                           >
                             <td className="py-2 px-1.5 text-center">
                               <div className="flex items-center justify-center gap-1">
@@ -1682,78 +1499,31 @@ export default function App() {
                                   onDragStart={(e) => handleDragStartRow(e, 'essentialExpenses', row.id)}
                                   onDragEnd={handleDragEndRow}
                                   title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
-                                  className="p-1 rounded-md text-slate-500 hover:text-blue-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                  className="p-1 rounded-md text-slate-500 hover:text-blue-400 hover:bg-slate-800 cursor-grab active:cursor-grabbing transition select-none"
                                 >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-                                    <line x1="4" y1="7" x2="20" y2="7" />
-                                    <line x1="4" y1="12" x2="20" y2="12" />
-                                    <line x1="4" y1="17" x2="20" y2="17" />
-                                  </svg>
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-                                <input
-                                  type="text"
-                                  value={row.no}
-                                  onChange={(e) => handleEssentialChange(row.id, 'no', e.target.value)}
-                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                                />
+                                <input type="text" value={row.no} onChange={(e) => handleEssentialChange(row.id, 'no', e.target.value)} className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
                               </div>
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.item}
-                                placeholder="ชื่อรายการ..."
-                                onChange={(e) => handleEssentialChange(row.id, 'item', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                              />
+                              <input type="text" value={row.item} placeholder="ชื่อรายการ..." onChange={(e) => handleEssentialChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.detail}
-                                placeholder="รายละเอียด..."
-                                onChange={(e) => handleEssentialChange(row.id, 'detail', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm"
-                              />
+                              <input type="text" value={row.detail} placeholder="รายละเอียด..." onChange={(e) => handleEssentialChange(row.id, 'detail', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 focus:bg-[#090D16] focus:outline-none text-xs" />
                             </td>
                             <td className="py-2 px-1.5">
-                              <EditableNumberCell
-                                value={row.amount}
-                                status={status}
-                                onChange={(val) => handleEssentialChange(row.id, 'amount', val)}
-                              />
+                              <EditableNumberCell value={row.amount} status={status} onChange={(val) => handleEssentialChange(row.id, 'amount', val)} />
                             </td>
                             <td className="py-2 px-2">
                               <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleEssentialChange(row.id, 'status', isPending ? 'none' : 'pending')}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border ${
-                                    isPending
-                                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.45)]'
-                                      : 'bg-[#090D16]/90 text-slate-400 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
-                                  }`}
-                                >
-                                  <Clock className="w-3 h-3 shrink-0" />
-                                  <span>รอจ่าย</span>
+                                <button type="button" onClick={() => handleEssentialChange(row.id, 'status', isPending ? 'none' : 'pending')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPending ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                  <Clock className="w-3 h-3" /> รอจ่าย
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleEssentialChange(row.id, 'status', isPaid ? 'none' : 'paid')}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border ${
-                                    isPaid
-                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.45)]'
-                                      : 'bg-[#090D16]/90 text-slate-400 border-slate-800 hover:border-rose-500/40 hover:text-rose-300'
-                                  }`}
-                                >
-                                  <CheckCircle2 className="w-3 h-3 shrink-0" />
-                                  <span>จ่ายแล้ว</span>
+                                <button type="button" onClick={() => handleEssentialChange(row.id, 'status', isPaid ? 'none' : 'paid')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPaid ? 'bg-rose-600 text-white border-rose-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                  <CheckCircle2 className="w-3 h-3" /> จ่ายแล้ว
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteEssentialRow(row.id)}
-                                  className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-                                >
+                                <button type="button" onClick={() => deleteEssentialRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
@@ -1765,52 +1535,29 @@ export default function App() {
                   </table>
                 </div>
 
-                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800/90 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total รายจ่ายจำเป็น</span>
-                    <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono">
-                      รอจ่าย ฿{formatCurrency(totals.essentialPendingTotal)}
-                    </span>
-                    <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full font-mono">
-                      จ่ายแล้ว ฿{formatCurrency(totals.essentialPaidTotal)}
-                    </span>
-                  </div>
+                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-400">Total รายจ่ายจำเป็น</span>
                   <div className="text-lg font-bold font-mono text-white">฿{formatCurrency(totals.essentialTotal)}</div>
                 </div>
               </section>
 
               {/* 3. เงินลงทุน */}
-              <section className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-                <div className="p-5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-cyan-950/30 via-transparent to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-                      <TrendingUp className="w-4 h-4" />
+              <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-cyan-950/30 via-transparent to-transparent">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-base font-bold text-white">3. เงินลงทุน</h2>
+                      <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">รอจ่าย {totals.investmentPendingCount}</span>
+                      <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">จ่ายแล้ว {totals.investmentPaidCount}</span>
                     </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-base font-bold text-white">3. เงินลงทุน</h2>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
-                          <Clock className="w-3 h-3 text-amber-400" />
-                          รอจ่าย {totals.investmentPendingCount}
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full">
-                          <CheckCircle2 className="w-3 h-3 text-rose-400" />
-                          จ่ายแล้ว {totals.investmentPaidCount}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400">งบลงทุนรายเดือน DCA กองทุน หุ้น และเงินสำรองฉุกเฉิน</p>
-                    </div>
+                    <p className="text-xs text-slate-400">งบลงทุนรายเดือน DCA กองทุน หุ้น และเงินสำรองฉุกเฉิน</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={addInvestmentRow}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 flex items-center gap-1 transition cursor-pointer shrink-0"
-                  >
+                  <button type="button" onClick={addInvestmentRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
                     <Plus className="w-3.5 h-3.5" /> เพิ่มพอร์ตลงทุน
                   </button>
                 </div>
 
-                {/* หลอดพลังควบคุมงบ 3. เงินลงทุน (เทียบ 100% = รายได้ทั้งหมด ข้อ 1) */}
+                {/* หลอดพลัง ข้อ 3. เงินลงทุน */}
                 {(() => {
                   const incomeFull = totals.incomeTotal;
                   const usedAmt = totals.investmentTotal;
@@ -1833,7 +1580,7 @@ export default function App() {
                                 : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
                             }`}
                           >
-                            ตั้งเป้าไม่เกิน {investmentLimitPct}% (฿{formatCurrency(limitAmt)})
+                            เพดาน {investmentLimitPct}% (฿{formatCurrency(limitAmt)})
                           </span>
                         </div>
                         <div className="font-mono text-xs">
@@ -1841,7 +1588,7 @@ export default function App() {
                           <span className={isOverLimit ? 'text-rose-400 font-bold' : 'text-cyan-300 font-bold'}>
                             ฿{formatCurrency(usedAmt)} ({usedPctOfIncome.toFixed(1)}%)
                           </span>
-                          <span className="text-slate-500"> / เต็มหลอด (รายได้ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
+                          <span className="text-slate-500"> / เต็มหลอด (ข้อ 1): ฿{formatCurrency(incomeFull)}</span>
                         </div>
                       </div>
 
@@ -1862,7 +1609,7 @@ export default function App() {
                         <div className="relative h-4 bg-[#060911] rounded-full overflow-hidden border border-slate-800 shadow-inner">
                           <div
                             style={{ width: `${Math.min(100, investmentLimitPct)}%` }}
-                            className="absolute inset-y-0 left-0 bg-slate-800/40 pointer-events-none"
+                            className="absolute inset-y-0 left-0 bg-slate-800/35 pointer-events-none"
                           />
                           <div
                             style={{ width: `${Math.min(100, usedPctOfIncome)}%` }}
@@ -1890,7 +1637,7 @@ export default function App() {
                             step="1"
                             value={investmentLimitPct}
                             onChange={(e) => handleLimitPctChange('investmentLimitPct', e.target.value)}
-                            className="w-full max-w-[220px] accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                            className="w-full max-w-[200px] accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                           />
                           <span className="text-xs font-mono font-bold text-amber-300 w-10">{investmentLimitPct}%</span>
                         </div>
@@ -1913,12 +1660,12 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
+                      <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
                         <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">รายการลงทุน</th>
-                        <th className="py-2.5 px-2">รายละเอียด / พอร์ต</th>
+                        <th className="py-2.5 px-2">รายละเอียด</th>
                         <th className="py-2.5 px-2 w-28 text-right">Budget (฿)</th>
-                        <th className="py-2.5 px-2 w-48 text-center">สถานะ (เปิด/ปิดได้)</th>
+                        <th className="py-2.5 px-2 w-44 text-center">สถานะ</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 text-sm">
@@ -1933,15 +1680,15 @@ export default function App() {
                             onDragOver={(e) => e.preventDefault()}
                             onDragEnter={() => handleDragEnterRow('investments', row.id, 1)}
                             onDragEnd={handleDragEndRow}
-                            className={`transition-colors ${
+                            className={
                               isDragging
-                                ? 'bg-cyan-500/20 opacity-60 ring-1 ring-cyan-500/50'
+                                ? 'bg-cyan-500/20 opacity-60'
                                 : isPaid
-                                ? 'bg-rose-950/20 hover:bg-rose-950/30'
+                                ? 'bg-rose-950/20'
                                 : isPending
-                                ? 'bg-amber-950/15 hover:bg-amber-950/25'
+                                ? 'bg-amber-950/15'
                                 : 'hover:bg-slate-800/30'
-                            }`}
+                            }
                           >
                             <td className="py-2 px-1.5 text-center">
                               <div className="flex items-center justify-center gap-1">
@@ -1950,78 +1697,31 @@ export default function App() {
                                   onDragStart={(e) => handleDragStartRow(e, 'investments', row.id)}
                                   onDragEnd={handleDragEndRow}
                                   title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
-                                  className="p-1 rounded-md text-slate-500 hover:text-cyan-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                  className="p-1 rounded-md text-slate-500 hover:text-cyan-400 hover:bg-slate-800 cursor-grab active:cursor-grabbing transition select-none"
                                 >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-                                    <line x1="4" y1="7" x2="20" y2="7" />
-                                    <line x1="4" y1="12" x2="20" y2="12" />
-                                    <line x1="4" y1="17" x2="20" y2="17" />
-                                  </svg>
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-                                <input
-                                  type="text"
-                                  value={row.no}
-                                  onChange={(e) => handleInvestmentChange(row.id, 'no', e.target.value)}
-                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                                />
+                                <input type="text" value={row.no} onChange={(e) => handleInvestmentChange(row.id, 'no', e.target.value)} className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
                               </div>
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.item}
-                                placeholder="ชื่อสินทรัพย์ / กองทุน..."
-                                onChange={(e) => handleInvestmentChange(row.id, 'item', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                              />
+                              <input type="text" value={row.item} placeholder="ชื่อสินทรัพย์..." onChange={(e) => handleInvestmentChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.detail}
-                                placeholder="รายละเอียด..."
-                                onChange={(e) => handleInvestmentChange(row.id, 'detail', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm"
-                              />
+                              <input type="text" value={row.detail} placeholder="รายละเอียด..." onChange={(e) => handleInvestmentChange(row.id, 'detail', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-300 focus:bg-[#090D16] focus:outline-none text-xs" />
                             </td>
                             <td className="py-2 px-1.5">
-                              <EditableNumberCell
-                                value={row.amount}
-                                status={status}
-                                onChange={(val) => handleInvestmentChange(row.id, 'amount', val)}
-                              />
+                              <EditableNumberCell value={row.amount} status={status} onChange={(val) => handleInvestmentChange(row.id, 'amount', val)} />
                             </td>
                             <td className="py-2 px-2">
                               <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleInvestmentChange(row.id, 'status', isPending ? 'none' : 'pending')}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border ${
-                                    isPending
-                                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.45)]'
-                                      : 'bg-[#090D16]/90 text-slate-400 border-slate-800 hover:border-amber-500/40 hover:text-amber-300'
-                                  }`}
-                                >
-                                  <Clock className="w-3 h-3 shrink-0" />
-                                  <span>รอจ่าย</span>
+                                <button type="button" onClick={() => handleInvestmentChange(row.id, 'status', isPending ? 'none' : 'pending')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPending ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                  <Clock className="w-3 h-3" /> รอจ่าย
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleInvestmentChange(row.id, 'status', isPaid ? 'none' : 'paid')}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer border ${
-                                    isPaid
-                                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_12px_rgba(244,63,94,0.45)]'
-                                      : 'bg-[#090D16]/90 text-slate-400 border-slate-800 hover:border-rose-500/40 hover:text-rose-300'
-                                  }`}
-                                >
-                                  <CheckCircle2 className="w-3 h-3 shrink-0" />
-                                  <span>จ่ายแล้ว</span>
+                                <button type="button" onClick={() => handleInvestmentChange(row.id, 'status', isPaid ? 'none' : 'paid')} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 cursor-pointer border ${isPaid ? 'bg-rose-600 text-white border-rose-400' : 'bg-[#090D16] text-slate-400 border-slate-800'}`}>
+                                  <CheckCircle2 className="w-3 h-3" /> จ่ายแล้ว
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteInvestmentRow(row.id)}
-                                  className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-                                >
+                                <button type="button" onClick={() => deleteInvestmentRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
@@ -2033,46 +1733,20 @@ export default function App() {
                   </table>
                 </div>
 
-                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800/90 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total เงินลงทุน</span>
-                    <span className="text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono">
-                      รอจ่าย ฿{formatCurrency(totals.investmentPendingTotal)}
-                    </span>
-                    <span className="text-[11px] bg-rose-500/15 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full font-mono">
-                      จ่ายแล้ว ฿{formatCurrency(totals.investmentPaidTotal)}
-                    </span>
-                  </div>
+                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-400">Total เงินลงทุน</span>
                   <div className="text-lg font-bold font-mono text-cyan-400">฿{formatCurrency(totals.investmentTotal)}</div>
                 </div>
               </section>
 
-              {/* 4. รวมรายจ่ายและรายจ่ายพิเศษ (ไม่มีหลอดพลัง) */}
-              <section className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl shadow-xl overflow-hidden flex flex-col">
-                <div className="p-5 border-b border-slate-800/90 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-rose-950/30 via-transparent to-transparent">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
-                      <CreditCard className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-base font-bold text-white">4. รวมรายจ่ายและรายจ่ายพิเศษ</h2>
-                        <button
-                          type="button"
-                          onClick={() => setExpensePercentMode(expensePercentMode === 'income' ? 'expense' : 'income')}
-                          className="text-[11px] bg-blue-500/15 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full hover:bg-blue-500/25 transition cursor-pointer"
-                        >
-                          % เทียบ{expensePercentMode === 'income' ? 'รายได้รวม' : 'รายจ่ายรวม'}
-                        </button>
-                      </div>
-                      <p className="text-xs text-slate-400">ซิงค์ยอดข้อ 2 + ข้อ 3 อัตโนมัติ และเพิ่มรายจ่ายพิเศษได้ (ไม่มีหลอดพลัง)</p>
-                    </div>
+              {/* 4. รวมรายจ่ายและรายจ่ายพิเศษ */}
+              <section className="bg-[#111827]/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col">
+                <div className="p-5 border-b border-slate-800 flex items-center justify-between gap-2 bg-gradient-to-r from-rose-950/30 via-transparent to-transparent">
+                  <div>
+                    <h2 className="text-base font-bold text-white">4. รวมรายจ่ายและรายจ่ายพิเศษ</h2>
+                    <p className="text-xs text-slate-400">ซิงค์ยอดข้อ 2 + ข้อ 3 อัตโนมัติ และเพิ่มรายจ่ายพิเศษได้ (ไม่มีหลอดพลัง)</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={addExtraExpenseRow}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 flex items-center gap-1 transition cursor-pointer shrink-0"
-                  >
+                  <button type="button" onClick={addExtraExpenseRow} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
                     <Plus className="w-3.5 h-3.5" /> เพิ่มรายจ่ายพิเศษ
                   </button>
                 </div>
@@ -2080,7 +1754,7 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-800/80 text-[11px] font-semibold uppercase tracking-wider text-slate-400 bg-[#0B0F19]/60">
+                      <tr className="border-b border-slate-800 text-[11px] font-semibold uppercase text-slate-400 bg-[#0B0F19]/60">
                         <th className="py-2.5 px-2 w-14 text-center">#</th>
                         <th className="py-2.5 px-2">หมวดหมู่รายจ่าย</th>
                         <th className="py-2.5 px-2 w-28 text-right">สัดส่วน (%)</th>
@@ -2091,42 +1765,18 @@ export default function App() {
                     <tbody className="divide-y divide-slate-800/60 text-sm">
                       <tr className="bg-blue-950/15">
                         <td className="py-2.5 px-2 text-center font-mono text-xs text-blue-400">1</td>
-                        <td className="py-2.5 px-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-slate-100">ค่าใช้จ่ายจำเป็น</span>
-                            <span className="inline-flex items-center gap-1 text-[10px] bg-blue-500/15 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded-md">
-                              <Link2 className="w-2.5 h-2.5" /> Auto-Sync
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono text-xs text-rose-400 font-semibold">
-                          {calcExpensePercent(totals.essentialTotal)}
-                        </td>
-                        <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-slate-100">
-                          {formatCurrency(totals.essentialTotal)}
-                        </td>
-                        <td className="py-2.5 px-2 text-center text-xs text-slate-600">—</td>
+                        <td className="py-2.5 px-2 font-medium text-slate-100">ค่าใช้จ่ายจำเป็น (Auto-Sync)</td>
+                        <td className="py-2.5 px-2 text-right font-mono text-xs text-rose-400">{calcExpensePercent(totals.essentialTotal)}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-slate-100">{formatCurrency(totals.essentialTotal)}</td>
+                        <td className="py-2.5 px-2 text-center text-slate-600">—</td>
                       </tr>
-
                       <tr className="bg-cyan-950/15">
                         <td className="py-2.5 px-2 text-center font-mono text-xs text-cyan-400">2</td>
-                        <td className="py-2.5 px-2">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-slate-100">ลงทุน , เงินเก็บ</span>
-                            <span className="inline-flex items-center gap-1 text-[10px] bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 px-1.5 py-0.5 rounded-md">
-                              <Link2 className="w-2.5 h-2.5" /> Auto-Sync
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-2 text-right font-mono text-xs text-cyan-400 font-semibold">
-                          {calcExpensePercent(totals.investmentTotal)}
-                        </td>
-                        <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-cyan-300">
-                          {formatCurrency(totals.investmentTotal)}
-                        </td>
-                        <td className="py-2.5 px-2 text-center text-xs text-slate-600">—</td>
+                        <td className="py-2.5 px-2 font-medium text-slate-100">ลงทุน , เงินเก็บ (Auto-Sync)</td>
+                        <td className="py-2.5 px-2 text-right font-mono text-xs text-cyan-400">{calcExpensePercent(totals.investmentTotal)}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-sm font-semibold text-cyan-300">{formatCurrency(totals.investmentTotal)}</td>
+                        <td className="py-2.5 px-2 text-center text-slate-600">—</td>
                       </tr>
-
                       {filteredExtraExpenses.map((row) => {
                         const isDragging = draggedItem?.listKey === 'extraExpenses' && draggedItem?.id === row.id;
                         return (
@@ -2135,11 +1785,7 @@ export default function App() {
                             onDragOver={(e) => e.preventDefault()}
                             onDragEnter={() => handleDragEnterRow('extraExpenses', row.id, 3)}
                             onDragEnd={handleDragEndRow}
-                            className={`transition-colors ${
-                              isDragging
-                                ? 'bg-rose-500/20 opacity-60 ring-1 ring-rose-500/50'
-                                : 'hover:bg-slate-800/30'
-                            }`}
+                            className={isDragging ? 'bg-rose-500/20 opacity-60' : 'hover:bg-slate-800/30'}
                           >
                             <td className="py-2 px-1.5 text-center">
                               <div className="flex items-center justify-center gap-1">
@@ -2148,46 +1794,22 @@ export default function App() {
                                   onDragStart={(e) => handleDragStartRow(e, 'extraExpenses', row.id)}
                                   onDragEnd={handleDragEndRow}
                                   title="กดค้างแล้วลากขึ้น/ลงเพื่อสลับตำแหน่ง"
-                                  className="p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800/80 cursor-grab active:cursor-grabbing transition select-none"
+                                  className="p-1 rounded-md text-slate-500 hover:text-rose-400 hover:bg-slate-800 cursor-grab active:cursor-grabbing transition select-none"
                                 >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
-                                    <line x1="4" y1="7" x2="20" y2="7" />
-                                    <line x1="4" y1="12" x2="20" y2="12" />
-                                    <line x1="4" y1="17" x2="20" y2="17" />
-                                  </svg>
+                                  <GripVertical className="w-3.5 h-3.5" />
                                 </div>
-                                <input
-                                  type="text"
-                                  value={row.no}
-                                  onChange={(e) => handleExtraExpenseChange(row.id, 'no', e.target.value)}
-                                  className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:text-white focus:outline-none"
-                                />
+                                <input type="text" value={row.no} onChange={(e) => handleExtraExpenseChange(row.id, 'no', e.target.value)} className="w-6 text-center bg-transparent text-xs font-mono text-slate-500 focus:outline-none" />
                               </div>
                             </td>
                             <td className="py-2 px-1.5">
-                              <input
-                                type="text"
-                                value={row.item}
-                                placeholder="รายการรายจ่ายเสริม..."
-                                onChange={(e) => handleExtraExpenseChange(row.id, 'item', e.target.value)}
-                                className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 placeholder:text-slate-600 focus:bg-[#090D16] focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                              />
+                              <input type="text" value={row.item} placeholder="รายการรายจ่ายเสริม..." onChange={(e) => handleExtraExpenseChange(row.id, 'item', e.target.value)} className="w-full px-2 py-1 rounded-lg bg-transparent text-slate-100 focus:bg-[#090D16] focus:outline-none text-sm" />
                             </td>
-                            <td className="py-2 px-2 text-right font-mono text-xs text-rose-300">
-                              {calcExpensePercent(row.amount)}
-                            </td>
+                            <td className="py-2 px-2 text-right font-mono text-xs text-rose-300">{calcExpensePercent(row.amount)}</td>
                             <td className="py-2 px-1.5">
-                              <EditableNumberCell
-                                value={row.amount}
-                                onChange={(val) => handleExtraExpenseChange(row.id, 'amount', val)}
-                              />
+                              <EditableNumberCell value={row.amount} onChange={(val) => handleExtraExpenseChange(row.id, 'amount', val)} />
                             </td>
                             <td className="py-2 px-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => deleteExtraExpenseRow(row.id)}
-                                className="p-1.5 rounded-lg text-slate-600 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer"
-                              >
+                              <button type="button" onClick={() => deleteExtraExpenseRow(row.id)} className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </td>
@@ -2198,8 +1820,8 @@ export default function App() {
                   </table>
                 </div>
 
-                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800/90 flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">รวมรายจ่ายทั้งหมด</span>
+                <div className="mt-auto p-4 bg-[#0B0F19] border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-400">รวมรายจ่ายทั้งหมด</span>
                   <div className="text-lg font-bold font-mono text-rose-400">฿{formatCurrency(totals.totalAllExpenses)}</div>
                 </div>
               </section>
@@ -2249,75 +1871,44 @@ export default function App() {
             </div>
           </>
         ) : (
-          /* Analytics Page */
+          /* หน้าสรุปรายเดือน & กราฟเปรียบเทียบ */
           <div className="space-y-8">
-            {/* หัวข้อหลัก: รายรับรายจ่ายเงินคงเหลือทั้งหมด */}
-            <div className="space-y-5">
-              <div className="bg-gradient-to-r from-blue-950/40 via-[#111827]/95 to-[#111827]/95 border border-blue-500/30 rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl">
+            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-400 text-xs font-semibold mb-2">
-                    <BarChart3 className="w-3.5 h-3.5" />
+                  <span className="text-[11px] font-semibold bg-blue-500/15 text-blue-400 border border-blue-500/30 px-2.5 py-0.5 rounded-full">
                     หัวข้อหลัก • Main Financial Summary
-                  </div>
-                  <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
-                    รายรับรายจ่ายเงินคงเหลือทั้งหมด
-                  </h2>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">
-                    สรุปภาพรวมรายรับ รายจ่ายทั้งหมด และยอดเงินคงเหลือสุทธิของทุกเดือน พร้อมจัดการแก้ไขหรือลบเดือนย้อนหลังได้ทันที
-                  </p>
+                  </span>
+                  <h2 className="text-xl font-bold text-white mt-1">รายรับรายจ่ายเงินคงเหลือทั้งหมด</h2>
+                  <p className="text-xs text-slate-400">สามารถคลิกเพื่อแก้ไขข้อมูล เปลี่ยนชื่อเดือน หรือลบเดือนย้อนหลังได้ทุกเดือน</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setNewMonthModal(true)}
-                  className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/25 flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 cursor-pointer self-start"
                 >
-                  <FolderPlus className="w-4 h-4" />
-                  <span>+ เพิ่มเดือนใหม่</span>
+                  <Plus className="w-4 h-4" />
+                  <span>เพิ่มเดือนใหม่</span>
                 </button>
               </div>
 
-              {/* การ์ดสรุปสะสมทุกเดือน */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-[#111827]/95 border border-emerald-500/30 rounded-2xl p-5">
-                  <div className="text-xs text-emerald-400 font-semibold mb-1">รวมรายรับสะสมทุกเดือน</div>
-                  <div className="text-2xl font-bold font-mono text-emerald-400">฿{formatCurrency(overallStats.totalIncomeAll)}</div>
-                </div>
-                <div className="bg-[#111827]/95 border border-rose-500/30 rounded-2xl p-5">
-                  <div className="text-xs text-rose-400 font-semibold mb-1">รวมรายจ่ายสะสมทุกเดือน</div>
-                  <div className="text-2xl font-bold font-mono text-rose-400">฿{formatCurrency(overallStats.totalExpenseAll)}</div>
-                </div>
-                <div className="bg-[#111827]/95 border border-blue-500/30 rounded-2xl p-5">
-                  <div className="text-xs text-blue-400 font-semibold mb-1">เงินคงเหลือสุทธิสะสม</div>
-                  <div className={`text-2xl font-bold font-mono ${overallStats.totalNetAll >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
-                    {overallStats.totalNetAll > 0 ? '+' : ''}฿{formatCurrency(overallStats.totalNetAll)}
-                  </div>
-                </div>
-              </div>
-
-              {/* กราฟแท่งเปรียบเทียบในหมวดหมู่ รายรับรายจ่ายเงินคงเหลือทั้งหมด ของแต่ละเดือน */}
-              <div className="bg-[#111827]/95 border border-slate-800/90 rounded-2xl p-6 space-y-5 shadow-xl">
+              <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 text-blue-400" />
-                      <span>กราฟแท่งเปรียบเทียบ รายรับ • รายจ่ายรวม • เงินคงเหลือสุทธิ ในแต่ละเดือน</span>
+                    <h3 className="text-sm sm:text-base font-bold text-white">
+                      📊 กราฟแท่งเปรียบเทียบ รายรับ • รายจ่ายรวม • เงินคงเหลือสุทธิ ของแต่ละเดือน
                     </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      เปรียบเทียบภาพรวมรายเดือนแบบเห็นชัดในกราฟเดียว (คลิกที่แท่งกราฟเพื่อเข้าไปแก้ไขข้อมูลเดือนนั้นได้ทันที)
-                    </p>
+                    <p className="text-xs text-slate-400">คลิกที่กราฟของเดือนใดก็ได้เพื่อสลับไปแก้ไขตารางงบของเดือนนั้น</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 text-xs">
                     <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                      <span className="w-3 h-3 rounded-sm bg-gradient-to-t from-emerald-600 to-emerald-400 inline-block" />
-                      1. รายได้รวม
+                      <span className="w-3 h-3 rounded-sm bg-emerald-500 inline-block" /> 1. รายได้รวม
                     </span>
                     <span className="flex items-center gap-1.5 text-rose-400 font-medium">
-                      <span className="w-3 h-3 rounded-sm bg-gradient-to-t from-rose-600 to-rose-400 inline-block" />
-                      4. รายจ่ายรวมทั้งหมด
+                      <span className="w-3 h-3 rounded-sm bg-rose-500 inline-block" /> 4. รายจ่ายรวม
                     </span>
                     <span className="flex items-center gap-1.5 text-blue-400 font-medium">
-                      <span className="w-3 h-3 rounded-sm bg-gradient-to-t from-blue-600 to-cyan-400 inline-block" />
-                      คงเหลือสุทธิ (TOTAL)
+                      <span className="w-3 h-3 rounded-sm bg-blue-500 inline-block" /> คงเหลือสุทธิ
                     </span>
                   </div>
                 </div>
@@ -2331,12 +1922,12 @@ export default function App() {
                   );
 
                   return (
-                    <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 overflow-x-auto">
-                      <div className="min-w-[540px] grid grid-cols-2 sm:grid-cols-4 gap-6 pt-4 pb-2 items-end">
+                    <div className="overflow-x-auto">
+                      <div className="min-w-[520px] grid grid-cols-2 sm:grid-cols-4 gap-5 pt-4 pb-1 items-end">
                         {monthlySummaries.map((m) => {
-                          const incH = Math.max(6, Math.round((m.incomeTotal / maxVal) * 160));
-                          const expH = Math.max(6, Math.round((m.totalAllExpenses / maxVal) * 160));
-                          const netH = Math.max(6, Math.round((Math.abs(m.netRemaining) / maxVal) * 160));
+                          const incH = Math.max(6, Math.round((m.incomeTotal / maxVal) * 150));
+                          const expH = Math.max(6, Math.round((m.totalAllExpenses / maxVal) * 150));
+                          const netH = Math.max(6, Math.round((Math.abs(m.netRemaining) / maxVal) * 150));
                           const isPositive = m.netRemaining >= 0;
 
                           return (
@@ -2346,61 +1937,43 @@ export default function App() {
                                 setActiveSheetId(m.id);
                                 setActivePage('workspace');
                               }}
-                              className="group bg-[#111827]/70 hover:bg-[#111827] border border-slate-800/80 hover:border-blue-500/40 rounded-xl p-4 flex flex-col items-center transition-all cursor-pointer"
+                              className="group bg-[#111827]/80 hover:bg-[#111827] border border-slate-800 hover:border-blue-500/40 rounded-xl p-4 flex flex-col items-center transition cursor-pointer"
                             >
-                              {/* แท่งกราฟ 3 แท่งคู่กัน */}
                               <div className="h-44 w-full flex items-end justify-center gap-3 border-b border-slate-800 pb-2 px-2">
-                                {/* รายรับ */}
-                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[42px]">
-                                  <span className="text-[10px] font-mono text-emerald-400 mb-1 opacity-85 group-hover:opacity-100">
+                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                  <span className="text-[10px] font-mono text-emerald-400 mb-1">
                                     {(m.incomeTotal / 1000).toFixed(1)}k
                                   </span>
                                   <div
                                     style={{ height: `${incH}px` }}
-                                    title={`รายได้รวม: ฿${formatCurrency(m.incomeTotal)}`}
-                                    className="w-full rounded-t-lg bg-gradient-to-t from-emerald-600 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.25)] transition-all duration-300"
+                                    className="w-full rounded-t-lg bg-gradient-to-t from-emerald-600 to-emerald-400"
                                   />
                                 </div>
-
-                                {/* รายจ่ายรวม */}
-                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[42px]">
-                                  <span className="text-[10px] font-mono text-rose-400 mb-1 opacity-85 group-hover:opacity-100">
+                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                  <span className="text-[10px] font-mono text-rose-400 mb-1">
                                     {(m.totalAllExpenses / 1000).toFixed(1)}k
                                   </span>
                                   <div
                                     style={{ height: `${expH}px` }}
-                                    title={`รายจ่ายรวม: ฿${formatCurrency(m.totalAllExpenses)}`}
-                                    className="w-full rounded-t-lg bg-gradient-to-t from-rose-600 to-rose-400 shadow-[0_0_10px_rgba(244,63,94,0.25)] transition-all duration-300"
+                                    className="w-full rounded-t-lg bg-gradient-to-t from-rose-600 to-rose-400"
                                   />
                                 </div>
-
-                                {/* เงินคงเหลือ */}
-                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[42px]">
-                                  <span
-                                    className={`text-[10px] font-mono mb-1 opacity-85 group-hover:opacity-100 ${
-                                      isPositive ? 'text-blue-400' : 'text-amber-400'
-                                    }`}
-                                  >
-                                    {isPositive ? '+' : '-'}
-                                    {(Math.abs(m.netRemaining) / 1000).toFixed(1)}k
+                                <div className="flex flex-col items-center justify-end h-full flex-1 max-w-[40px]">
+                                  <span className={`text-[10px] font-mono mb-1 ${isPositive ? 'text-blue-400' : 'text-amber-400'}`}>
+                                    {isPositive ? '+' : '-'}{(Math.abs(m.netRemaining) / 1000).toFixed(1)}k
                                   </span>
                                   <div
                                     style={{ height: `${netH}px` }}
-                                    title={`คงเหลือสุทธิ: ฿${formatCurrency(m.netRemaining)}`}
-                                    className={`w-full rounded-t-lg transition-all duration-300 ${
+                                    className={`w-full rounded-t-lg ${
                                       isPositive
-                                        ? 'bg-gradient-to-t from-blue-600 to-cyan-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]'
+                                        ? 'bg-gradient-to-t from-blue-600 to-cyan-400'
                                         : 'bg-gradient-to-t from-amber-600 to-amber-400'
                                     }`}
                                   />
                                 </div>
                               </div>
-
-                              {/* ชื่อเดือนและตัวเลขสรุปด้านล่างแท่งกราฟ */}
                               <div className="mt-3 text-center w-full space-y-1">
-                                <div className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">
-                                  {m.name}
-                                </div>
+                                <div className="text-sm font-bold text-white group-hover:text-blue-400">{m.name}</div>
                                 <div className="text-[11px] font-mono flex items-center justify-between text-slate-400 px-1">
                                   <span>คงเหลือ:</span>
                                   <span className={`font-bold ${isPositive ? 'text-blue-400' : 'text-rose-400'}`}>
@@ -2417,153 +1990,103 @@ export default function App() {
                 })()}
               </div>
 
-              {/* ตารางและปุ่มจัดการเดือนย้อนหลัง */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {monthlySummaries.map((m) => (
-                  <div key={m.id} className="bg-[#111827]/95 border border-slate-800/90 hover:border-slate-700 rounded-2xl p-5 space-y-3 transition-all">
+                  <div key={m.id} className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="font-bold text-white">{m.name}</span>
                       <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveSheetId(m.id);
-                            setActivePage('workspace');
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
-                        >
-                          แก้ข้อมูล
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditMonthModal({ id: m.id, name: m.name })}
-                          className="p-1.5 rounded-lg bg-[#090D16] text-slate-300 hover:text-blue-400 border border-slate-800 cursor-pointer"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteMonthModal({ id: m.id, name: m.name })}
-                          className="p-1.5 rounded-lg bg-[#090D16] text-slate-400 hover:text-rose-400 border border-slate-800 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <button onClick={() => { setActiveSheetId(m.id); setActivePage('workspace'); }} className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs cursor-pointer">แก้ข้อมูล</button>
+                        <button onClick={() => setEditMonthModal({ id: m.id, name: m.name })} className="p-1 text-slate-400 hover:text-blue-400 cursor-pointer"><Edit3 className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setDeleteMonthModal({ id: m.id, name: m.name })} className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"><Trash2 className="w-3.5 h-3.5" /></button>
                       </div>
                     </div>
-                    <div className="text-xs font-mono space-y-1.5 text-slate-300">
-                      <div className="flex justify-between"><span>1. รายได้:</span><span className="text-emerald-400 font-semibold">฿{formatCurrency(m.incomeTotal)}</span></div>
+                    <div className="text-xs font-mono space-y-1">
+                      <div className="flex justify-between"><span>1. รายได้:</span><span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span></div>
                       <div className="flex justify-between"><span>2. รายจ่ายจำเป็น:</span><span className="text-rose-400">฿{formatCurrency(m.essentialTotal)}</span></div>
                       <div className="flex justify-between"><span>3. เงินลงทุน:</span><span className="text-cyan-400">฿{formatCurrency(m.investmentTotal)}</span></div>
                       <div className="flex justify-between"><span>4. รวมรายจ่ายและพิเศษ:</span><span className="text-rose-300">฿{formatCurrency(m.totalAllExpenses)}</span></div>
-                      <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold">
-                        <span>คงเหลือสุทธิ:</span>
-                        <span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>
-                          {m.netRemaining > 0 ? '+' : ''}฿{formatCurrency(m.netRemaining)}
-                        </span>
-                      </div>
+                      <div className="flex justify-between border-t border-slate-800 pt-1 font-bold"><span>คงเหลือสุทธิ:</span><span className={m.netRemaining >= 0 ? 'text-blue-400' : 'text-rose-400'}>฿{formatCurrency(m.netRemaining)}</span></div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* หัวข้อรอง: กราฟเปรียบเทียบหัวข้อย่อย 1. รายได้, 2. รายจ่ายจำเป็น, 3. เงินลงทุน */}
-            <div className="space-y-5">
-              <div className="bg-[#111827]/95 border border-slate-800 rounded-2xl p-6">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-semibold mb-2">
-                  <PieChart className="w-3.5 h-3.5" />
-                  หัวข้อรอง • Sub-Category Monthly Comparison Graphs
-                </div>
-                <h3 className="text-lg sm:text-xl font-bold text-white">
+            <div className="bg-[#111827] border border-slate-800 rounded-2xl p-6 space-y-5">
+              <div>
+                <span className="text-[11px] font-semibold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 px-2.5 py-0.5 rounded-full">
+                  หัวข้อรอง • Sub-Category Comparison Graphs
+                </span>
+                <h3 className="text-lg font-bold text-white mt-1">
                   กราฟเปรียบเทียบหัวข้อย่อย (1. รายได้ • 2. รายจ่ายจำเป็น • 3. เงินลงทุน) ของแต่ละเดือน
                 </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  เปรียบเทียบแนวโน้มแต่ละหมวดหมู่แยกตามรายเดือน พร้อมสัดส่วนเปอร์เซ็นต์ต่อรายได้
-                </p>
+              </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-                  {/* กราฟ 1: รายได้ */}
-                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-emerald-400">1. รายได้ของแต่ละเดือน</span>
-                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalIncomeAll)}</span>
-                    </div>
-                    <div className="space-y-3">
-                      {(() => {
-                        const maxInc = Math.max(...monthlySummaries.map((m) => m.incomeTotal), 1);
-                        return monthlySummaries.map((m) => {
-                          const barW = Math.min(100, (m.incomeTotal / maxInc) * 100);
-                          return (
-                            <div key={m.id} className="space-y-1">
-                              <div className="flex justify-between text-xs font-mono">
-                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
-                                <span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span>
-                              </div>
-                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
-                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-emerald-600 to-teal-400 rounded-full transition-all duration-300" />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div className="text-sm font-bold text-emerald-400">1. รายได้ของแต่ละเดือน</div>
+                  {(() => {
+                    const maxInc = Math.max(...monthlySummaries.map((m) => m.incomeTotal), 1);
+                    return monthlySummaries.map((m) => {
+                      const barW = Math.min(100, (m.incomeTotal / maxInc) * 100);
+                      return (
+                        <div key={m.id} className="space-y-1">
+                          <div className="flex justify-between text-xs font-mono">
+                            <span className="text-slate-300 font-sans">{m.name}</span>
+                            <span className="text-emerald-400">฿{formatCurrency(m.incomeTotal)}</span>
+                          </div>
+                          <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                            <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-emerald-600 to-teal-400 rounded-full" />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
 
-                  {/* กราฟ 2: รายจ่ายจำเป็น */}
-                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-blue-400">2. รายจ่ายจำเป็น</span>
-                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalEssentialAll)}</span>
-                    </div>
-                    <div className="space-y-3">
-                      {(() => {
-                        const maxEss = Math.max(...monthlySummaries.map((m) => m.essentialTotal), 1);
-                        return monthlySummaries.map((m) => {
-                          const barW = Math.min(100, (m.essentialTotal / maxEss) * 100);
-                          const pctInc = m.incomeTotal > 0 ? (m.essentialTotal / m.incomeTotal) * 100 : 0;
-                          return (
-                            <div key={m.id} className="space-y-1">
-                              <div className="flex justify-between text-xs font-mono">
-                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
-                                <span className="text-blue-300">฿{formatCurrency(m.essentialTotal)} ({pctInc.toFixed(1)}%)</span>
-                              </div>
-                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
-                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-blue-600 to-rose-500 rounded-full transition-all duration-300" />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
+                <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div className="text-sm font-bold text-blue-400">2. รายจ่ายจำเป็น</div>
+                  {(() => {
+                    const maxEss = Math.max(...monthlySummaries.map((m) => m.essentialTotal), 1);
+                    return monthlySummaries.map((m) => {
+                      const barW = Math.min(100, (m.essentialTotal / maxEss) * 100);
+                      const pctInc = m.incomeTotal > 0 ? (m.essentialTotal / m.incomeTotal) * 100 : 0;
+                      return (
+                        <div key={m.id} className="space-y-1">
+                          <div className="flex justify-between text-xs font-mono">
+                            <span className="text-slate-300 font-sans">{m.name}</span>
+                            <span className="text-blue-300">฿{formatCurrency(m.essentialTotal)} ({pctInc.toFixed(1)}%)</span>
+                          </div>
+                          <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                            <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-blue-600 to-rose-500 rounded-full" />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
 
-                  {/* กราฟ 3: เงินลงทุน */}
-                  <div className="bg-[#090D16] border border-slate-800/90 rounded-2xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-bold text-cyan-400">3. เงินลงทุน</span>
-                      <span className="text-xs font-mono text-slate-400">รวม ฿{formatCurrency(overallStats.totalInvestmentAll)}</span>
-                    </div>
-                    <div className="space-y-3">
-                      {(() => {
-                        const maxInv = Math.max(...monthlySummaries.map((m) => m.investmentTotal), 1);
-                        return monthlySummaries.map((m) => {
-                          const barW = Math.min(100, (m.investmentTotal / maxInv) * 100);
-                          const pctInc = m.incomeTotal > 0 ? (m.investmentTotal / m.incomeTotal) * 100 : 0;
-                          return (
-                            <div key={m.id} className="space-y-1">
-                              <div className="flex justify-between text-xs font-mono">
-                                <span className="text-slate-300 font-sans font-medium">{m.name}</span>
-                                <span className="text-cyan-300">฿{formatCurrency(m.investmentTotal)} ({pctInc.toFixed(1)}%)</span>
-                              </div>
-                              <div className="h-3 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
-                                <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full transition-all duration-300" />
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
+                <div className="bg-[#090D16] border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div className="text-sm font-bold text-cyan-400">3. เงินลงทุน</div>
+                  {(() => {
+                    const maxInv = Math.max(...monthlySummaries.map((m) => m.investmentTotal), 1);
+                    return monthlySummaries.map((m) => {
+                      const barW = Math.min(100, (m.investmentTotal / maxInv) * 100);
+                      const pctInc = m.incomeTotal > 0 ? (m.investmentTotal / m.incomeTotal) * 100 : 0;
+                      return (
+                        <div key={m.id} className="space-y-1">
+                          <div className="flex justify-between text-xs font-mono">
+                            <span className="text-slate-300 font-sans">{m.name}</span>
+                            <span className="text-cyan-300">฿{formatCurrency(m.investmentTotal)} ({pctInc.toFixed(1)}%)</span>
+                          </div>
+                          <div className="h-2.5 bg-[#111827] rounded-full overflow-hidden border border-slate-800">
+                            <div style={{ width: `${barW}%` }} className="h-full bg-gradient-to-r from-cyan-500 to-emerald-400 rounded-full" />
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </div>
@@ -2573,8 +2096,8 @@ export default function App() {
 
       {/* Modal สร้างเดือนใหม่ */}
       {newMonthModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800">
             <h3 className="text-base font-bold text-white mb-3">สร้างงบประมาณเดือนใหม่</h3>
             <form onSubmit={handleCreateNewMonth} className="space-y-4">
               <input
@@ -2583,30 +2106,15 @@ export default function App() {
                 placeholder="เช่น ธ.ค. 2026"
                 value={newMonthName}
                 onChange={(e) => setNewMonthName(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-3.5 py-2 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white"
               />
               <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={copyFromCurrent}
-                  onChange={(e) => setCopyFromCurrent(e.target.checked)}
-                />
+                <input type="checkbox" checked={copyFromCurrent} onChange={(e) => setCopyFromCurrent(e.target.checked)} />
                 <span>คัดลอกโครงสร้างรายการจากเดือนปัจจุบัน ({currentSheet.name})</span>
               </label>
               <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setNewMonthModal(false)}
-                  className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
-                >
-                  สร้างเดือนใหม่
-                </button>
+                <button type="button" onClick={() => setNewMonthModal(false)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+                <button type="submit" className="px-4 py-2 text-xs font-semibold bg-blue-600 text-white rounded-xl">สร้างเดือนใหม่</button>
               </div>
             </form>
           </div>
@@ -2615,8 +2123,8 @@ export default function App() {
 
       {/* Modal แก้ไขชื่อเดือน */}
       {editMonthModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800">
             <h3 className="text-base font-bold text-white mb-3">แก้ไขชื่อเดือน</h3>
             <form onSubmit={handleRenameMonth} className="space-y-4">
               <input
@@ -2624,87 +2132,32 @@ export default function App() {
                 required
                 value={editMonthModal.name}
                 onChange={(e) => setEditMonthModal({ ...editMonthModal, name: e.target.value })}
-                className="w-full px-3.5 py-2.5 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full px-3.5 py-2 bg-[#090D16] border border-slate-800 rounded-xl text-sm text-white"
               />
               <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditMonthModal(null)}
-                  className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-xl cursor-pointer"
-                >
-                  บันทึกชื่อใหม่
-                </button>
+                <button type="button" onClick={() => setEditMonthModal(null)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+                <button type="submit" className="px-4 py-2 text-xs font-semibold bg-blue-600 text-white rounded-xl">บันทึกชื่อเดือน</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Modal ยืนยันการลบเดือน */}
+      {/* Modal ยืนยันลบเดือน */}
       {deleteMonthModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2">
-              ยืนยันการลบเดือน "{deleteMonthModal.name}"?
-            </h3>
-            <p className="text-xs text-slate-400 mb-5">
-              ข้อมูลในเดือนนี้จะถูกลบออกจากระบบและซิงค์อัปเดตไปยัง Cloud อัตโนมัติ
-            </p>
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-rose-500/30 space-y-4">
+            <h3 className="text-base font-bold text-white">ยืนยันการลบข้อมูลเดือน "{deleteMonthModal.name}"</h3>
+            <p className="text-xs text-slate-400">คุณต้องการลบข้อมูลเดือนนี้ออกจากระบบใช่หรือไม่?</p>
             <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteMonthModal(null)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteMonthById(deleteMonthModal.id)}
-                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl cursor-pointer"
-              >
-                ยืนยันลบเดือนนี้
-              </button>
+              <button type="button" onClick={() => setDeleteMonthModal(null)} className="px-4 py-2 text-xs text-slate-400">ยกเลิก</button>
+              <button type="button" onClick={() => handleDeleteMonthById(deleteMonthModal.id)} className="px-4 py-2 text-xs font-semibold bg-rose-600 text-white rounded-xl">ยืนยันลบเดือน</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal ยืนยันรีเซ็ตข้อมูล */}
-      {confirmResetModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111827] rounded-2xl max-w-md w-full p-6 border border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-2">รีเซ็ตข้อมูลเดือนนี้กลับเป็นค่าเริ่มต้น?</h3>
-            <p className="text-xs text-slate-400 mb-5">
-              ข้อมูลในเดือน "{currentSheet.name}" จะถูกรีเซ็ตกลับเป็นรายการเริ่มต้น
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmResetModal(false)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={handleResetToDefault}
-                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-xl cursor-pointer"
-              >
-                ยืนยันรีเซ็ต
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal ล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ */}
+      {/* Modal ตั้งค่า Google Apps Script Web App URL */}
       {cloudModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#111827] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-emerald-500/30">
@@ -2714,8 +2167,8 @@ export default function App() {
                   <Cloud className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">ล็อกอินอีเมลซิงค์ Cloud อัตโนมัติ</h3>
-                  <p className="text-xs text-slate-400">เปิดจากคอมเครื่องไหนข้อมูลก็อัปเดตล่าสุดตรงกันทันที</p>
+                  <h3 className="text-base font-bold text-white">ตั้งค่า URL Google Apps Script (Auto-Sync 100%)</h3>
+                  <p className="text-xs text-slate-400">เปิดจากคอมหรือมือถือเครื่องไหน ใส่ URL เดิม ข้อมูลตรงกัน 100%</p>
                 </div>
               </div>
               {lastSyncedAt && (
@@ -2728,53 +2181,87 @@ export default function App() {
             <form onSubmit={handleSaveCloudSettings} className="space-y-4">
               <div className="bg-[#090D16] p-4 rounded-xl border border-emerald-500/30 space-y-2.5">
                 <label className="block text-xs font-bold text-emerald-300">
-                  1. อีเมลของคุณ หรือ รหัสซิงค์ส่วนตัว (Auto-Sync ทันทีโดยไม่ต้องตั้งค่าเพิ่ม)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="เช่น yourname@gmail.com"
-                  value={inputCloudEmail}
-                  onChange={(e) => setInputCloudEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-[#111827] border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:border-emerald-500 font-mono"
-                />
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  💡 เพียงใส่อีเมลเดียวกันนี้เวลาเปิดในคอมเครื่องอื่น ข้อมูลทั้ง 4 หัวข้อและทุกเดือนจะซิงค์อัปเดตล่าสุดให้ตรงกันโดยอัตโนมัติ
-                </p>
-              </div>
-
-              <div className="bg-[#090D16]/70 p-4 rounded-xl border border-slate-800 space-y-2">
-                <label className="block text-xs font-semibold text-slate-300">
-                  2. Google Apps Script Web App URL (เสริม - ไม่บังคับ)
+                  Google Apps Script Web App URL (ลงท้ายด้วย /exec)
                 </label>
                 <div className="relative">
-                  <Key className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Key className="w-4 h-4 text-emerald-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input
                     type="url"
+                    required
                     placeholder="https://script.google.com/macros/s/AKfycb.../exec"
                     value={inputGasUrl}
                     onChange={(e) => setInputGasUrl(e.target.value)}
-                    className="w-full pl-9 pr-3.5 py-2 bg-[#111827] border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+                    className="w-full pl-9 pr-3.5 py-2.5 bg-[#111827] border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
                   />
                 </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  💡 ทุกตัวเลข ทั้ง 4 หมวดหมู่ และข้อมูลย้อนหลังทุกเดือน จะถูกบันทึกอัตโนมัติลง Google Sheets ทันทีที่แก้ไข
+                </p>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setCloudModal(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                  onClick={() => {
+                    setCloudModal(false);
+                    setShowCodeModal(true);
+                  }}
+                  className="text-xs text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
                 >
-                  ปิด
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>ดูโค้ด Code.gs</span>
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer"
-                >
-                  บันทึก & ซิงค์อัตโนมัติ
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCloudModal(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white rounded-xl cursor-pointer"
+                  >
+                    ปิด
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl cursor-pointer"
+                  >
+                    บันทึก URL & ซิงค์ข้อมูล 100%
+                  </button>
+                </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal แสดงโค้ด Code.gs สำหรับคัดลอก */}
+      {showCodeModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-slate-700 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-white">โค้ดสำหรับ Google Apps Script (Code.gs)</h3>
+                <p className="text-xs text-slate-400">คัดลอกไปวางใน Extensions &gt; Apps Script แล้วกด Deploy &gt; New deployment (เลือก Anyone)</p>
+              </div>
+              <button
+                type="button"
+                onClick={copyCodeGsToClipboard}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>คัดลอก Code.gs</span>
+              </button>
+            </div>
+            <pre className="bg-[#090D16] border border-slate-800 rounded-xl p-4 text-[11px] font-mono text-emerald-300 overflow-x-auto max-h-80">
+              {GAS_CODE_TEMPLATE}
+            </pre>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCodeModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white cursor-pointer"
+              >
+                ปิดหน้าต่าง
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -177,8 +177,9 @@ function doGet(e) {
       }
     }
     var activeSheetId = '';
-    if (db.configSheet.getLastRow() > 1) {
-      var configVals = db.configSheet.getRange(2, 1, db.configSheet.getLastRow() - 1, 2).getValues();
+    var configLastRow = db.configSheet.getLastRow();
+    if (configLastRow > 1) {
+      var configVals = db.configSheet.getRange(2, 1, configLastRow - 1, 2).getValues();
       for (var j = 0; j < configVals.length; j++) {
         if (configVals[j][0] === 'activeSheetId') { activeSheetId = configVals[j][1]; break; }
       }
@@ -193,15 +194,16 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(15000);
     var db = initDatabase();
-    var rawBody = e.postData && e.postData.contents ? e.postData.contents : '{}';
+    var rawBody = e && e.postData && e.postData.contents ? e.postData.contents : '';
+    if (!rawBody) {
+      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'No data' })).setMimeType(ContentService.MimeType.JSON);
+    }
     var payload = JSON.parse(rawBody);
     var sheets = Array.isArray(payload.sheets) ? payload.sheets : [];
     var activeSheetId = payload.activeSheetId || (sheets[0] ? sheets[0].id : '');
-    var now = new Date().toISOString();
+    var now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
 
     var rowsToWrite = sheets.map(function(sheet) {
       var essentialTotal = (sheet.essentialExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
@@ -212,11 +214,15 @@ function doPost(e) {
       return [sheet.id || '', sheet.name || '', incomeTotal, essentialTotal, investmentTotal, extraTotal, netRemaining, now, JSON.stringify(sheet)];
     });
 
-    if (db.monthSheet.getLastRow() > 1) {
-      db.monthSheet.getRange(2, 1, db.monthSheet.getLastRow() - 1, 9).clearContent();
+    var currentLastRow = db.monthSheet.getLastRow();
+    if (currentLastRow > 1) {
+      db.monthSheet.getRange(2, 1, currentLastRow - 1, 9).clearContent();
     }
     if (rowsToWrite.length > 0) {
       db.monthSheet.getRange(2, 1, rowsToWrite.length, 9).setValues(rowsToWrite);
+    }
+    if (db.configSheet.getLastRow() > 1) {
+      db.configSheet.getRange(2, 1, db.configSheet.getLastRow() - 1, 3).clearContent();
     }
     db.configSheet.getRange(2, 1, 1, 3).setValues([['activeSheetId', activeSheetId, now]]);
 
@@ -226,8 +232,6 @@ function doPost(e) {
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
-  } finally {
-    lock.releaseLock();
   }
 }`;
 
@@ -552,7 +556,7 @@ function doPost(e) {
         setSyncStatus('loading');
         try {
           const sep = targetUrl.includes('?') ? '&' : '?';
-          const response = await fetch(`${targetUrl}${sep}t=${Date.now()}`, {
+          const response = await fetch(`${targetUrl}${sep}action=fetchAll`, {
             method: 'GET',
             redirect: 'follow',
           });
@@ -570,14 +574,13 @@ function doPost(e) {
               setLastSyncedAt(new Date());
               setSyncStatus('synced');
               isInitialFetchedRef.current = true;
-              if (!silent) showToast(`ดึงข้อมูลล่าสุดสำเร็จ (${normalized.length} เดือน) • โหมดซิงค์ Auto ปิดอยู่`);
+              if (!silent) showToast(`ดึงข้อมูลล่าสุดสำเร็จ (${normalized.length} เดือน)`);
               return true;
             } else {
-              // กรณี Google Sheets ยังว่างเปล่า ห้ามเขียนทับอัตโนมัติเด็ดขาด (Fetch Only)
               setLastSyncedAt(new Date());
               setSyncStatus('idle');
               isInitialFetchedRef.current = true;
-              if (!silent) showToast('เชื่อมต่อสำเร็จ (ยังไม่มีข้อมูลใน Google Sheets • กดปุ่ม "ซิงค์ Auto" เมื่อต้องการเริ่มบันทึก)');
+              if (!silent) showToast('เชื่อมต่อสำเร็จ (ยังไม่มีข้อมูลใน Google Sheets)');
               return true;
             }
           } else {
@@ -594,21 +597,23 @@ function doPost(e) {
         if (!targetUrl) return;
         setSyncStatus('saving');
         try {
+          const payloadString = JSON.stringify({
+            action: 'syncAll',
+            sheets: Array.isArray(sheetsData) ? sheetsData : [],
+            activeSheetId: activeId || '',
+          });
+
           const response = await fetch(targetUrl, {
             method: 'POST',
             redirect: 'follow',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'syncAll',
-              sheets: Array.isArray(sheetsData) ? sheetsData : [],
-              activeSheetId: activeId || '',
-            }),
+            body: payloadString,
           });
           const result = await response.json();
           if (result && result.status === 'success') {
             setLastSyncedAt(new Date());
             setSyncStatus('synced');
-            if (!silent) showToast('บันทึกข้อมูลล่าสุดลง Google Apps Script เรียบร้อยแล้ว');
+            if (!silent) showToast('บันทึกข้อมูลล่าสุดลง Google Sheets เรียบร้อยแล้ว');
           } else {
             setSyncStatus('error');
           }
@@ -617,7 +622,7 @@ function doPost(e) {
         }
       };
 
-      // เปิดเว็บขึ้นมา: ดึงข้อมูลอย่างเดียว (Fetch Only) และบังคับปิดโหมดซิงค์ Auto เสมอ
+      // เปิดเว็บขึ้นมา: ดึงข้อมูลอย่างเดียว (Fetch Only)
       useEffect(() => {
         setIsAutoSyncEnabled(false);
         if (gasUrl && isUrlConnected) {
@@ -625,9 +630,9 @@ function doPost(e) {
         }
       }, []);
 
-      // ซิงค์อัตโนมัติเฉพาะเมื่อผู้ใช้กดเปิดปุ่ม "ซิงค์ Auto" (isAutoSyncEnabled === true) เท่านั้น
+      // ซิงค์อัตโนมัติเฉพาะเมื่อเปิดโหมด "ซิงค์ Auto"
       useEffect(() => {
-        if (!isAutoSyncEnabled || !gasUrl || !isUrlConnected || !isInitialFetchedRef.current) return;
+        if (!isAutoSyncEnabled || !gasUrl || !isUrlConnected) return;
         if (isRemoteUpdateRef.current) {
           isRemoteUpdateRef.current = false;
           return;
@@ -652,8 +657,7 @@ function doPost(e) {
         setIsAutoSyncEnabled(nextState);
 
         if (nextState) {
-          isInitialFetchedRef.current = true;
-          showToast('เปิดโหมด "ซิงค์ Auto" แล้ว • กำลังบันทึกข้อมูลล่าสุดขึ้นระบบ...');
+          showToast('เปิดโหมด "ซิงค์ Auto" แล้ว • กำลังบันทึกข้อมูลขึ้น Google Sheets...');
           await pushToGoogleSheet(gasUrl, sheets, activeSheetId, false);
         } else {
           setSyncStatus('idle');

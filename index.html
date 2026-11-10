@@ -150,6 +150,8 @@ function initDatabase() {
   var monthSheet = ss.getSheetByName(SHEET_MONTHS);
   if (!monthSheet) {
     monthSheet = ss.insertSheet(SHEET_MONTHS);
+  }
+  if (monthSheet.getLastRow() === 0) {
     var headers = ['month_id','month_name','income_total','essential_total','investment_total','extra_total','net_remaining','updated_at','raw_json'];
     monthSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     monthSheet.setFrozenRows(1);
@@ -157,22 +159,82 @@ function initDatabase() {
   var configSheet = ss.getSheetByName(SHEET_CONFIG);
   if (!configSheet) {
     configSheet = ss.insertSheet(SHEET_CONFIG);
+  }
+  if (configSheet.getLastRow() === 0) {
     configSheet.getRange(1, 1, 1, 3).setValues([['config_key', 'config_value', 'updated_at']]);
     configSheet.setFrozenRows(1);
   }
   return { ss: ss, monthSheet: monthSheet, configSheet: configSheet };
 }
 
-function doGet(e) {
+function savePayloadToSheets(payload) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
   try {
     var db = initDatabase();
+    var sheets = (payload && Array.isArray(payload.sheets)) ? payload.sheets : (Array.isArray(payload) ? payload : []);
+    var activeSheetId = (payload && payload.activeSheetId) ? String(payload.activeSheetId) : (sheets[0] ? String(sheets[0].id || '') : '');
+    var now = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'dd/MM/yyyy HH:mm:ss');
+
+    var rowsToWrite = sheets.map(function(sheet, idx) {
+      var essentialTotal = (sheet.essentialExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var investmentTotal = (sheet.investments || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var incomeTotal = (sheet.incomes || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var extraTotal = (sheet.extraExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
+      var netRemaining = incomeTotal - (essentialTotal + investmentTotal + extraTotal);
+      return [
+        String(sheet.id || ('sheet_' + idx)),
+        String(sheet.name || ''),
+        Number(incomeTotal) || 0,
+        Number(essentialTotal) || 0,
+        Number(investmentTotal) || 0,
+        Number(extraTotal) || 0,
+        Number(netRemaining) || 0,
+        now,
+        JSON.stringify(sheet)
+      ];
+    });
+
+    var maxRows = db.monthSheet.getMaxRows();
+    if (maxRows > 1) {
+      db.monthSheet.getRange(2, 1, maxRows - 1, 9).clearContent();
+    }
+    if (rowsToWrite.length > 0) {
+      db.monthSheet.getRange(2, 1, rowsToWrite.length, 9).setValues(rowsToWrite);
+    }
+
+    var maxConfigRows = db.configSheet.getMaxRows();
+    if (maxConfigRows > 1) {
+      db.configSheet.getRange(2, 1, maxConfigRows - 1, 3).clearContent();
+    }
+    db.configSheet.getRange(2, 1, 2, 3).setValues([
+      ['activeSheetId', activeSheetId, now],
+      ['lastSavedCount', String(rowsToWrite.length), now]
+    ]);
+
+    SpreadsheetApp.flush();
+    return { status: 'success', savedCount: rowsToWrite.length, updatedAt: now };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function doGet(e) {
+  try {
+    var params = (e && e.parameter) ? e.parameter : {};
+    if (params.action === 'syncAll' && params.payload) {
+      return ContentService.createTextOutput(JSON.stringify(savePayloadToSheets(JSON.parse(params.payload))))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    var db = initDatabase();
+    SpreadsheetApp.flush();
     var lastRow = db.monthSheet.getLastRow();
     var sheets = [];
     if (lastRow > 1) {
       var values = db.monthSheet.getRange(2, 1, lastRow - 1, 9).getValues();
       for (var i = 0; i < values.length; i++) {
         if (values[i][8]) {
-          try { sheets.push(JSON.parse(values[i][8])); } catch (err) {}
+          try { sheets.push(JSON.parse(String(values[i][8]))); } catch (err) {}
         }
       }
     }
@@ -181,7 +243,7 @@ function doGet(e) {
     if (configLastRow > 1) {
       var configVals = db.configSheet.getRange(2, 1, configLastRow - 1, 2).getValues();
       for (var j = 0; j < configVals.length; j++) {
-        if (configVals[j][0] === 'activeSheetId') { activeSheetId = configVals[j][1]; break; }
+        if (String(configVals[j][0]) === 'activeSheetId') { activeSheetId = String(configVals[j][1] || ''); break; }
       }
     }
     return ContentService.createTextOutput(JSON.stringify({
@@ -195,40 +257,12 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    var db = initDatabase();
-    var rawBody = e && e.postData && e.postData.contents ? e.postData.contents : '';
+    var rawBody = (e && e.postData && e.postData.contents) ? e.postData.contents : ((e && e.parameter && e.parameter.payload) ? e.parameter.payload : '');
     if (!rawBody) {
-      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'No data' })).setMimeType(ContentService.MimeType.JSON);
+      return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: 'Empty Body' })).setMimeType(ContentService.MimeType.JSON);
     }
-    var payload = JSON.parse(rawBody);
-    var sheets = Array.isArray(payload.sheets) ? payload.sheets : [];
-    var activeSheetId = payload.activeSheetId || (sheets[0] ? sheets[0].id : '');
-    var now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-
-    var rowsToWrite = sheets.map(function(sheet) {
-      var essentialTotal = (sheet.essentialExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-      var investmentTotal = (sheet.investments || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-      var incomeTotal = (sheet.incomes || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-      var extraTotal = (sheet.extraExpenses || []).reduce(function(s, r) { return s + (Number(r.amount) || 0); }, 0);
-      var netRemaining = incomeTotal - (essentialTotal + investmentTotal + extraTotal);
-      return [sheet.id || '', sheet.name || '', incomeTotal, essentialTotal, investmentTotal, extraTotal, netRemaining, now, JSON.stringify(sheet)];
-    });
-
-    var currentLastRow = db.monthSheet.getLastRow();
-    if (currentLastRow > 1) {
-      db.monthSheet.getRange(2, 1, currentLastRow - 1, 9).clearContent();
-    }
-    if (rowsToWrite.length > 0) {
-      db.monthSheet.getRange(2, 1, rowsToWrite.length, 9).setValues(rowsToWrite);
-    }
-    if (db.configSheet.getLastRow() > 1) {
-      db.configSheet.getRange(2, 1, db.configSheet.getLastRow() - 1, 3).clearContent();
-    }
-    db.configSheet.getRange(2, 1, 1, 3).setValues([['activeSheetId', activeSheetId, now]]);
-
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'success', savedCount: rowsToWrite.length, updatedAt: now
-    })).setMimeType(ContentService.MimeType.JSON);
+    var res = savePayloadToSheets(JSON.parse(rawBody));
+    return ContentService.createTextOutput(JSON.stringify(res)).setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     return ContentService.createTextOutput(JSON.stringify({ status: 'error', message: error.toString() }))
       .setMimeType(ContentService.MimeType.JSON);
@@ -594,31 +628,54 @@ function doPost(e) {
       };
 
       const pushToGoogleSheet = async (targetUrl = gasUrl, sheetsData = sheets, activeId = activeSheetId, silent = true) => {
-        if (!targetUrl) return;
+        if (!targetUrl) return false;
         setSyncStatus('saving');
-        try {
-          const payloadString = JSON.stringify({
-            action: 'syncAll',
-            sheets: Array.isArray(sheetsData) ? sheetsData : [],
-            activeSheetId: activeId || '',
-          });
 
+        const safeSheets = Array.isArray(sheetsData) ? sheetsData : [];
+        const payloadObj = {
+          action: 'syncAll',
+          sheets: safeSheets,
+          activeSheetId: activeId || (safeSheets[0] ? safeSheets[0].id : ''),
+        };
+        const payloadString = JSON.stringify(payloadObj);
+
+        try {
           const response = await fetch(targetUrl, {
             method: 'POST',
             redirect: 'follow',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: payloadString,
           });
-          const result = await response.json();
+          const text = await response.text();
+          let result = null;
+          try {
+            result = JSON.parse(text);
+          } catch (e) {}
+
           if (result && result.status === 'success') {
             setLastSyncedAt(new Date());
             setSyncStatus('synced');
-            if (!silent) showToast('บันทึกข้อมูลล่าสุดลง Google Sheets เรียบร้อยแล้ว');
-          } else {
-            setSyncStatus('error');
+            if (!silent) showToast(`บันทึกข้อมูลลง Google Sheets สำเร็จ (${result.savedCount || safeSheets.length} เดือน)`);
+            return true;
           }
+          throw new Error(result?.message || 'POST fallback triggered');
         } catch (err) {
-          setSyncStatus('error');
+          try {
+            await fetch(targetUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: payloadString,
+            });
+            setLastSyncedAt(new Date());
+            setSyncStatus('synced');
+            if (!silent) showToast('ส่งข้อมูลบันทึกลง Google Sheets เรียบร้อยแล้ว');
+            return true;
+          } catch (fallbackErr) {
+            setSyncStatus('error');
+            if (!silent) showToast('บันทึกลง Google Sheets ไม่สำเร็จ กรุณาตรวจสอบการ Deploy');
+            return false;
+          }
         }
       };
 
@@ -1261,6 +1318,17 @@ function doPost(e) {
                     className="p-2 rounded-xl bg-[#111827] hover:bg-slate-800 text-emerald-400 border border-slate-800 cursor-pointer"
                   >
                     <IconRotate className="w-4 h-4" />
+                  </button>
+                )}
+
+                {isUrlConnected && (
+                  <button
+                    type="button"
+                    onClick={() => pushToGoogleSheet(gasUrl, sheets, activeSheetId, false)}
+                    title="บังคับส่งข้อมูลทั้งหมดลง Google Sheet ทันที"
+                    className="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                  >
+                    บันทึกขึ้น Sheet ทันที
                   </button>
                 )}
 
